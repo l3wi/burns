@@ -1,13 +1,16 @@
-import { Navigate, Outlet, useParams } from "react-router-dom"
+import { Navigate, Outlet } from "react-router-dom"
 
-import { workspaces } from "@/features/workspaces/mock-data"
+import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-workspace"
 
 export function WorkspaceLayout() {
-  const { workspaceId } = useParams()
-  const workspace = workspaces.find((entry) => entry.id === workspaceId)
+  const { workspace, workspaces, isLoading } = useActiveWorkspace()
 
-  if (!workspace) {
-    return <Navigate to={`/w/${workspaces[0]?.id}/overview`} replace />
+  if (isLoading) {
+    return <div className="p-6 text-sm text-muted-foreground">Loading workspace…</div>
+  }
+
+  if (!workspace && workspaces[0]) {
+    return <Navigate to={`/w/${workspaces[0].id}/overview`} replace />
   }
 
   return <Outlet />

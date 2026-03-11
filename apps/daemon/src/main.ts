@@ -1,4 +1,7 @@
 import { createApp } from "@/server/app"
+import { initializeWorkspaceService } from "@/services/workspace-service"
+
+initializeWorkspaceService()
 
 const app = createApp()
 

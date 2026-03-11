@@ -1,3 +1,4 @@
+import { handleAgentRoutes } from "@/server/routes/agent-routes"
 import { handleApprovalRoutes } from "@/server/routes/approval-routes"
 import { handleDiagnosticsRoutes } from "@/server/routes/diagnostics-routes"
 import { handleHealthRequest } from "@/server/routes/health-routes"
@@ -15,7 +16,7 @@ const jsonHeaders = {
 export function createApp() {
   return {
     port: 7332,
-    fetch(request: Request) {
+    async fetch(request: Request) {
       if (request.method === "OPTIONS") {
         return new Response(null, { headers: jsonHeaders })
       }
@@ -25,8 +26,9 @@ export function createApp() {
 
       const response =
         (pathname === "/api/health" ? handleHealthRequest() : null) ??
-        handleWorkspaceRoutes(pathname) ??
-        handleWorkflowRoutes(pathname) ??
+        handleAgentRoutes(pathname) ??
+        (await handleWorkspaceRoutes(request, pathname)) ??
+        (await handleWorkflowRoutes(request, pathname)) ??
         handleRunRoutes(pathname) ??
         handleApprovalRoutes(pathname) ??
         handleSettingsRoutes(pathname) ??

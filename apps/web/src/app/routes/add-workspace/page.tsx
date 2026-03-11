@@ -1,4 +1,10 @@
+import { useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
+
+import type { CreateWorkspaceInput, WorkspaceSourceType } from "@mr-burns/shared"
+
 import { PageHeader } from "@/components/app-shell/page-header"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -8,11 +14,66 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { useSettings } from "@/features/settings/hooks/use-settings"
+import { useCreateWorkspace } from "@/features/workspaces/hooks/use-create-workspace"
 
 const steps = ["Workspace", "Source", "Workflows", "Confirm"]
 
 export function AddWorkspacePage() {
+  const navigate = useNavigate()
+  const { data: settings } = useSettings()
+  const createWorkspace = useCreateWorkspace()
+
+  const [name, setName] = useState("burns-web-app")
+  const [sourceType, setSourceType] = useState<WorkspaceSourceType>("create")
+  const [sourceValue, setSourceValue] = useState("")
+  const [targetFolder, setTargetFolder] = useState("burns-web-app")
+
+  const sourceLabel = useMemo(() => {
+    if (sourceType === "local") {
+      return "Local repo path"
+    }
+
+    if (sourceType === "clone") {
+      return "Repository URL"
+    }
+
+    return "Target folder"
+  }, [sourceType])
+
+  async function handleCreateWorkspace() {
+    const payload: CreateWorkspaceInput =
+      sourceType === "local"
+        ? {
+            name,
+            sourceType,
+            localPath: sourceValue,
+          }
+        : sourceType === "clone"
+          ? {
+              name,
+              sourceType,
+              repoUrl: sourceValue,
+              targetFolder,
+            }
+          : {
+              name,
+              sourceType,
+              targetFolder,
+            }
+
+    const workspace = await createWorkspace.mutateAsync(payload)
+    navigate(`/w/${workspace.id}/overview`)
+  }
+
   return (
     <div className="flex flex-col">
       <PageHeader
@@ -35,22 +96,78 @@ export function AddWorkspacePage() {
           <Card>
             <CardHeader>
               <CardTitle>Create a workspace</CardTitle>
-              <CardDescription>Start with a repo source and workflow templates.</CardDescription>
+              <CardDescription>
+                Start with a repo source and bootstrap the workspace folder.
+              </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              <Input defaultValue="burns-web-app" />
-              <div className="rounded-xl border bg-muted px-4 py-3">
-                <p className="text-sm font-medium">Clone repository</p>
-                <p className="text-sm text-muted-foreground">Other options: choose folder · create new</p>
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">Workspace name</p>
+                <Input value={name} onChange={(event) => setName(event.target.value)} />
               </div>
-              <Input defaultValue="github.com/acme/burns-web-app" />
-              <Input defaultValue="issue-to-pr · pr-feedback · approval-gate" />
-              <div className="flex items-center justify-between gap-3">
-                <Button variant="outline">Back</Button>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline">Save draft</Button>
-                  <Button>Next step</Button>
+
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">Source mode</p>
+                <Select
+                  value={sourceType}
+                  onValueChange={(value) => setSourceType(value as WorkspaceSourceType)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Choose source mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="create">Create new repo</SelectItem>
+                      <SelectItem value="clone">Clone repository</SelectItem>
+                      <SelectItem value="local">Add existing local repo</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {sourceType === "local" || sourceType === "clone" ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm font-medium">{sourceLabel}</p>
+                  <Input
+                    value={sourceValue}
+                    onChange={(event) => setSourceValue(event.target.value)}
+                    placeholder={
+                      sourceType === "local"
+                        ? "/Users/lewi/Documents/ai/my-repo"
+                        : "https://github.com/acme/burns-web-app.git"
+                    }
+                  />
                 </div>
+              ) : null}
+
+              {sourceType === "clone" || sourceType === "create" ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm font-medium">Target folder</p>
+                  <Input
+                    value={targetFolder}
+                    onChange={(event) => setTargetFolder(event.target.value)}
+                  />
+                </div>
+              ) : null}
+
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">Workflow templates</p>
+                <Input defaultValue="issue-to-pr · pr-feedback · approval-gate" disabled />
+              </div>
+
+              {createWorkspace.error ? (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  {createWorkspace.error.message}
+                </div>
+              ) : null}
+
+              <div className="flex items-center justify-end gap-2">
+                <Button variant="outline" disabled>
+                  Save draft
+                </Button>
+                <Button onClick={() => void handleCreateWorkspace()} disabled={createWorkspace.isPending}>
+                  {createWorkspace.isPending ? "Creating…" : "Create workspace"}
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -61,9 +178,9 @@ export function AddWorkspacePage() {
                 <CardTitle>Summary</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-2 text-sm text-muted-foreground">
-                <p>Workspace root: /Users/lewi/MrBurns/repos</p>
-                <p>Target folder: burns-web-app</p>
-                <p>Agent default: Claude Code</p>
+                <p>Workspace root: {settings?.workspaceRoot ?? "Loading…"}</p>
+                <p>Target folder: {targetFolder || name}</p>
+                <p>Agent default: {settings?.defaultAgent ?? "Loading…"}</p>
               </CardContent>
             </Card>
             <Card>

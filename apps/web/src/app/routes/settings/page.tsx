@@ -7,8 +7,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { useSettings } from "@/features/settings/hooks/use-settings"
 
 export function SettingsPage() {
+  const { data: settings, isLoading } = useSettings()
+
   return (
     <div className="flex flex-col">
       <PageHeader
@@ -22,9 +25,18 @@ export function SettingsPage() {
             <CardDescription>Defaults used by the Burns daemon.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
-            <div className="rounded-xl border bg-muted px-4 py-3">authToken: SMITHERS_API_KEY</div>
-            <div className="rounded-xl border bg-muted px-4 py-3">rootDir: /home/workflows</div>
-            <div className="rounded-xl border bg-muted px-4 py-3">allowNetwork: false</div>
+            <div className="rounded-xl border bg-muted px-4 py-3">
+              workspaceRoot: {isLoading ? "Loading…" : settings?.workspaceRoot}
+            </div>
+            <div className="rounded-xl border bg-muted px-4 py-3">
+              defaultAgent: {isLoading ? "Loading…" : settings?.defaultAgent}
+            </div>
+            <div className="rounded-xl border bg-muted px-4 py-3">
+              smithersBaseUrl: {isLoading ? "Loading…" : settings?.smithersBaseUrl}
+            </div>
+            <div className="rounded-xl border bg-muted px-4 py-3">
+              allowNetwork: {isLoading ? "Loading…" : String(settings?.allowNetwork ?? false)}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -33,7 +45,7 @@ export function SettingsPage() {
             <CardDescription>Restart required only for schema or registry changes.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button>Apply now</Button>
+            <Button disabled>Apply now</Button>
           </CardContent>
         </Card>
       </div>

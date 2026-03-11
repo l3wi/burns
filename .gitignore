@@ -6,6 +6,8 @@ bun.lock
 *.log
 dist
 coverage
+.data/
+apps/daemon/.data/
 .sqlite
 .sqlite-shm
 .sqlite-wal

@@ -11,5 +11,15 @@ export const workflowSchema = z.object({
   updatedAt: z.string().optional(),
 })
 
+export const workflowDocumentSchema = workflowSchema.extend({
+  source: z.string(),
+})
+
+export const updateWorkflowInputSchema = z.object({
+  source: z.string(),
+})
+
 export type Workflow = z.infer<typeof workflowSchema>
+export type WorkflowDocument = z.infer<typeof workflowDocumentSchema>
 export type WorkflowStatus = z.infer<typeof workflowStatusSchema>
+export type UpdateWorkflowInput = z.infer<typeof updateWorkflowInputSchema>

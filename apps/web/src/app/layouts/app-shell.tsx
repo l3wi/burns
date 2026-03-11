@@ -1,9 +1,9 @@
-import { Outlet, useLocation, useParams } from "react-router-dom"
+import { Outlet, useLocation } from "react-router-dom"
 
 import { SidebarNav } from "@/components/app-shell/sidebar-nav"
 import { WorkspaceSelector } from "@/components/app-shell/workspace-selector"
 import { Badge } from "@/components/ui/badge"
-import { workspaces } from "@/features/workspaces/mock-data"
+import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-workspace"
 
 const globalItems = [
   { label: "Workflows", to: "/workflows" },
@@ -13,15 +13,13 @@ const globalItems = [
 
 export function AppShell() {
   const location = useLocation()
-  const params = useParams()
-  const selectedWorkspace =
-    workspaces.find((workspace) => workspace.id === params.workspaceId) ?? workspaces[0]
+  const { workspace } = useActiveWorkspace()
 
-  const workspaceItems = selectedWorkspace
+  const workspaceItems = workspace
     ? [
-        { label: "Overview", to: `/w/${selectedWorkspace.id}/overview` },
-        { label: "Runs", to: `/w/${selectedWorkspace.id}/runs` },
-        { label: "Approvals", to: `/w/${selectedWorkspace.id}/approvals` },
+        { label: "Overview", to: `/w/${workspace.id}/overview` },
+        { label: "Runs", to: `/w/${workspace.id}/runs` },
+        { label: "Approvals", to: `/w/${workspace.id}/approvals` },
       ]
     : []
 
@@ -41,14 +39,14 @@ export function AppShell() {
 
           <SidebarNav title="Global" items={globalItems} />
           <WorkspaceSelector />
-          {selectedWorkspace ? <SidebarNav title="Workspace" items={workspaceItems} /> : null}
+          {workspace ? <SidebarNav title="Workspace" items={workspaceItems} /> : null}
         </div>
       </aside>
 
       <div className="flex min-h-screen flex-col">
         <header className="flex items-center justify-between border-b px-6 py-4">
           <div className="flex items-center gap-2">
-            {selectedWorkspace ? <Badge variant="secondary">{selectedWorkspace.name}</Badge> : null}
+            {workspace ? <Badge variant="secondary">{workspace.name}</Badge> : null}
             <Badge variant="outline">{location.pathname}</Badge>
           </div>
           <div className="flex items-center gap-2">

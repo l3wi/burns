@@ -1,3 +1,13 @@
+import type { WorkflowDocument } from "@mr-burns/shared"
+
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockCopyButton,
+  CodeBlockFilename,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@/components/ai-elements/code-block"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -7,29 +17,60 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { selectedWorkflowSource, workflows } from "@/features/workspaces/mock-data"
 
-export function WorkflowEditorPane() {
-  const selectedWorkflow = workflows[0]
-
+export function WorkflowEditorPane({
+  workflow,
+  onCreateNew,
+  onDelete,
+  onEditWithAi,
+  isDeleting = false,
+}: {
+  workflow: WorkflowDocument | null
+  onCreateNew?: () => void
+  onDelete?: () => void
+  onEditWithAi?: () => void
+  isDeleting?: boolean
+}) {
   return (
     <Card className="min-h-[32rem] gap-4">
       <CardHeader>
         <div className="flex flex-col gap-1">
-          <CardTitle>{selectedWorkflow.name} / workflow.tsx</CardTitle>
-          <CardDescription>{selectedWorkflow.relativePath}</CardDescription>
+          <CardTitle>{workflow ? workflow.name : "Select a workflow"}</CardTitle>
+          <CardDescription>
+            {workflow
+              ? "Preview the current workflow source."
+              : "Choose a workflow from the list to inspect its source."}
+          </CardDescription>
         </div>
         <CardAction className="flex items-center gap-2">
-          <Button variant="outline">New workflow</Button>
-          <Button>Save</Button>
+          <Button variant="outline" onClick={onCreateNew}>
+            New workflow
+          </Button>
+          <Button variant="outline" disabled={!workflow} onClick={onEditWithAi}>
+            Edit with AI
+          </Button>
+          <Button variant="destructive" disabled={!workflow || isDeleting} onClick={onDelete}>
+            {isDeleting ? "Deleting…" : "Delete"}
+          </Button>
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-3">
-        <div className="min-h-[24rem] rounded-xl bg-primary px-4 py-3 text-sm text-primary-foreground">
-          <pre className="overflow-x-auto whitespace-pre-wrap font-mono leading-6">
-            {selectedWorkflowSource}
-          </pre>
-        </div>
+        {workflow ? (
+          <CodeBlock className="max-h-[36rem]" code={workflow.source} language="tsx" showLineNumbers>
+            <CodeBlockHeader>
+              <CodeBlockTitle>
+                <CodeBlockFilename>workflow.tsx</CodeBlockFilename>
+              </CodeBlockTitle>
+              <CodeBlockActions>
+                <CodeBlockCopyButton />
+              </CodeBlockActions>
+            </CodeBlockHeader>
+          </CodeBlock>
+        ) : (
+          <div className="flex min-h-[24rem] items-center justify-center rounded-xl border px-6 text-sm text-muted-foreground">
+            Select a workflow to preview highlighted source.
+          </div>
+        )}
       </CardContent>
     </Card>
   )

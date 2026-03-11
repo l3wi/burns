@@ -1,16 +1,16 @@
-import { createBrowserRouter, Navigate } from "react-router-dom"
+import { createBrowserRouter } from "react-router-dom"
 
 import { AppShell } from "@/app/layouts/app-shell"
 import { WorkspaceLayout } from "@/app/layouts/workspace-layout"
+import { HomePage } from "@/app/routes/home/page"
 import { AddWorkspacePage } from "@/app/routes/add-workspace/page"
 import { SettingsPage } from "@/app/routes/settings/page"
+import { EditWorkflowPage } from "@/app/routes/workflows/edit/page"
+import { NewWorkflowPage } from "@/app/routes/workflows/new/page"
 import { WorkflowsPage } from "@/app/routes/workflows/page"
 import { WorkspaceApprovalsPage } from "@/app/routes/workspace/approvals/page"
 import { WorkspaceOverviewPage } from "@/app/routes/workspace/overview/page"
 import { WorkspaceRunsPage } from "@/app/routes/workspace/runs/page"
-import { workspaces } from "@/features/workspaces/mock-data"
-
-const defaultWorkspaceId = workspaces[0]?.id ?? "default"
 
 export const router = createBrowserRouter([
   {
@@ -19,10 +19,22 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <Navigate to={`/w/${defaultWorkspaceId}/overview`} replace />,
+        element: <HomePage />,
       },
       {
         path: "workflows",
+        element: <WorkflowsPage />,
+      },
+      {
+        path: "workflows/new",
+        element: <NewWorkflowPage />,
+      },
+      {
+        path: "workflows/:workflowId/edit",
+        element: <EditWorkflowPage />,
+      },
+      {
+        path: "workflows/:workflowId",
         element: <WorkflowsPage />,
       },
       {

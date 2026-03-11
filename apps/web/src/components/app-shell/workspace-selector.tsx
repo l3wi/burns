@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 
 import {
   Select,
@@ -8,12 +8,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { workspaces } from "@/features/workspaces/mock-data"
+import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-workspace"
 
 export function WorkspaceSelector() {
+  const location = useLocation()
   const navigate = useNavigate()
-  const params = useParams()
-  const selectedWorkspaceId = params.workspaceId ?? workspaces[0]?.id
+  const { workspace, workspaceId, workspaces, isLoading, setWorkspaceId } = useActiveWorkspace()
+
+  if (isLoading) {
+    return <div className="rounded-xl border bg-card p-3 text-sm text-muted-foreground">Loading workspace…</div>
+  }
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border bg-card p-3">
@@ -22,26 +26,34 @@ export function WorkspaceSelector() {
         <p className="text-xs text-muted-foreground">Switch the active repo context.</p>
       </div>
       <Select
-        value={selectedWorkspaceId}
-        onValueChange={(value) => navigate(`/w/${value}/overview`)}
+        value={workspaceId}
+        onValueChange={(value) => {
+          setWorkspaceId(value)
+
+          if (location.pathname.startsWith("/workflows")) {
+            return
+          }
+
+          navigate(`/w/${value}/overview`)
+        }}
       >
         <SelectTrigger className="w-full">
           <SelectValue placeholder="Select a workspace" />
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            {workspaces.map((workspace) => (
-              <SelectItem key={workspace.id} value={workspace.id}>
-                {workspace.name}
+            {workspaces.map((entry) => (
+              <SelectItem key={entry.id} value={entry.id}>
+                {entry.name}
               </SelectItem>
             ))}
           </SelectGroup>
         </SelectContent>
       </Select>
-      {workspaces[0] ? (
+      {workspace ? (
         <div className="flex flex-col gap-1 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
-          <span>{workspaces[0].branch ?? "main"}</span>
-          <span className="truncate">{workspaces[0].path}</span>
+          <span>{workspace.branch ?? "main"}</span>
+          <span className="truncate">{workspace.path}</span>
         </div>
       ) : null}
     </div>

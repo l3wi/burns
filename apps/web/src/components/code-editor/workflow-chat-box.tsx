@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 
-export function WorkflowChatBox() {
+export function WorkflowChatBox({ disabled = false }: { disabled?: boolean }) {
   return (
     <Card size="sm">
       <CardHeader>
@@ -18,9 +18,12 @@ export function WorkflowChatBox() {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <Textarea defaultValue="Add an approval gate before deploy and preserve stable task IDs." />
+        <Textarea
+          disabled={disabled}
+          defaultValue="Add an approval gate before deploy and preserve stable task IDs."
+        />
         <div className="flex justify-end">
-          <Button>Send</Button>
+          <Button disabled={disabled}>Send</Button>
         </div>
       </CardContent>
     </Card>
