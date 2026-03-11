@@ -84,6 +84,30 @@ Returns workspace status based on filesystem presence:
 - `disconnected`
 - `unknown`
 
+## `GET /api/workspaces/:workspaceId/server/status`
+
+Returns workspace Smithers runtime status:
+
+- `runtimeMode` (`burns-managed` or `self-managed`)
+- `processState` (`starting`, `healthy`, `crashed`, `stopped`, `self-managed`, `disabled`)
+- `lastHeartbeatAt`
+- `restartCount`
+- `crashCount`
+- `port`
+- `baseUrl`
+
+## `POST /api/workspaces/:workspaceId/server/start`
+
+Starts workspace Smithers runtime (managed mode) and returns server status payload.
+
+## `POST /api/workspaces/:workspaceId/server/restart`
+
+Restarts workspace Smithers runtime (managed mode) and returns server status payload.
+
+## `POST /api/workspaces/:workspaceId/server/stop`
+
+Stops workspace Smithers runtime (managed mode) and returns server status payload.
+
 ## Workflows
 
 Workflows are stored on disk under:
@@ -209,6 +233,7 @@ SSE proxy stream to Smithers events endpoint.
 Response content type: `text/event-stream`.
 
 Incoming `event: smithers` payloads are persisted to SQLite.
+Burns also maintains a background ingestion stream per active run, so events continue to persist even if no web client is currently connected to this SSE endpoint.
 
 ## Approvals
 

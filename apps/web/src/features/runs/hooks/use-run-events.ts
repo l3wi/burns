@@ -5,6 +5,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { burnsClient } from "@/lib/api/client"
 
+const RECONNECT_DELAY_BASE_MS = 500
+const RECONNECT_DELAY_MAX_MS = 5000
+
 function normalizeEventPayload(payload: unknown, fallbackRunId: string, fallbackSeq: number): RunEvent {
   const asObject =
     payload && typeof payload === "object" && !Array.isArray(payload)
@@ -30,6 +33,14 @@ function normalizeEventPayload(payload: unknown, fallbackRunId: string, fallback
   }
 }
 
+export function getLastRunEventSeq(events: RunEvent[]) {
+  return events[events.length - 1]?.seq
+}
+
+export function getSseReconnectDelayMs(reconnectAttempts: number) {
+  return Math.min(RECONNECT_DELAY_MAX_MS, RECONNECT_DELAY_BASE_MS * 2 ** reconnectAttempts)
+}
+
 export function useRunEvents(workspaceId?: string, runId?: string) {
   const queryClient = useQueryClient()
   const queryKey = ["run-events", workspaceId, runId] as const
@@ -47,10 +58,33 @@ export function useRunEvents(workspaceId?: string, runId?: string) {
     }
 
     const targetQueryKey = ["run-events", workspaceId, runId] as const
-    const existingEvents = queryClient.getQueryData<RunEvent[]>(targetQueryKey) ?? []
-    const lastSeq = existingEvents[existingEvents.length - 1]?.seq
-    const streamUrl = burnsClient.getRunEventStreamUrl(workspaceId, runId, lastSeq).toString()
-    const source = new EventSource(streamUrl)
+    let source: EventSource | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let reconnectAttempts = 0
+    let cancelled = false
+
+    const clearReconnectTimer = () => {
+      if (!reconnectTimer) {
+        return
+      }
+
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+
+    const scheduleReconnect = () => {
+      if (cancelled || reconnectTimer) {
+        return
+      }
+
+      const delayMs = getSseReconnectDelayMs(reconnectAttempts)
+      reconnectAttempts += 1
+
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        connect()
+      }, delayMs)
+    }
 
     const handleSmithersEvent = (event: MessageEvent<string>) => {
       const currentEvents = queryClient.getQueryData<RunEvent[]>(targetQueryKey) ?? []
@@ -73,14 +107,43 @@ export function useRunEvents(workspaceId?: string, runId?: string) {
       }
     }
 
-    source.addEventListener("smithers", handleSmithersEvent as EventListener)
-    source.onerror = () => {
-      source.close()
-    }
+    const closeSource = () => {
+      if (!source) {
+        return
+      }
 
-    return () => {
       source.removeEventListener("smithers", handleSmithersEvent as EventListener)
       source.close()
+      source = null
+    }
+
+    const connect = () => {
+      if (cancelled) {
+        return
+      }
+
+      const existingEvents = queryClient.getQueryData<RunEvent[]>(targetQueryKey) ?? []
+      const lastSeq = getLastRunEventSeq(existingEvents)
+      const streamUrl = burnsClient.getRunEventStreamUrl(workspaceId, runId, lastSeq).toString()
+
+      closeSource()
+      source = new EventSource(streamUrl)
+      source.addEventListener("smithers", handleSmithersEvent as EventListener)
+      source.onopen = () => {
+        reconnectAttempts = 0
+      }
+      source.onerror = () => {
+        closeSource()
+        scheduleReconnect()
+      }
+    }
+
+    connect()
+
+    return () => {
+      cancelled = true
+      clearReconnectTimer()
+      closeSource()
     }
   }, [queryClient, runId, workspaceId])
 

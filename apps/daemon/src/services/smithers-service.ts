@@ -1,4 +1,5 @@
 import path from "node:path"
+import { existsSync } from "node:fs"
 
 import type { CancelRunInput, ResumeRunInput, Run, StartRunInput } from "@mr-burns/shared"
 
@@ -11,8 +12,11 @@ import {
   streamSmithersRunEvents,
 } from "@/integrations/smithers/http-client"
 import { ensureWorkspaceSmithersBaseUrl } from "@/services/smithers-instance-service"
+import { repairLegacyDefaultWorkflowTemplate } from "@/services/workflow-service"
 import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
+
+const EPOCH_ISO_TIMESTAMP = "1970-01-01T00:00:00.000Z"
 
 function asObject(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -42,7 +46,11 @@ function asNumber(value: unknown) {
 }
 
 function normalizeStatus(value: unknown): Run["status"] {
-  const status = asString(value)?.toLowerCase().trim()
+  const status = asString(value)
+    ?.toLowerCase()
+    .trim()
+    .replaceAll("_", "-")
+    .replaceAll(" ", "-")
 
   if (!status) {
     return "running"
@@ -50,23 +58,39 @@ function normalizeStatus(value: unknown): Run["status"] {
 
   if (
     status === "waiting-approval" ||
-    status === "waiting_approval" ||
     status === "needs-approval" ||
-    status === "pending-approval"
+    status === "pending-approval" ||
+    status === "wait-approval" ||
+    status === "awaiting-approval" ||
+    status === "approval-required"
   ) {
     return "waiting-approval"
   }
 
-  if (status === "finished" || status === "completed" || status === "success") {
+  if (
+    status === "finished" ||
+    status === "completed" ||
+    status === "success" ||
+    status === "done"
+  ) {
     return "finished"
   }
 
-  if (status === "failed" || status === "error") {
+  if (status === "failed" || status === "error" || status === "errored") {
     return "failed"
   }
 
   if (status === "cancelled" || status === "canceled") {
     return "cancelled"
+  }
+
+  if (
+    status === "running" ||
+    status === "in-progress" ||
+    status === "inprogress" ||
+    status === "active"
+  ) {
+    return "running"
   }
 
   return "running"
@@ -97,9 +121,11 @@ function mapSmithersRun(workspaceId: string, payload: unknown): Run {
   const run = asObject(payload)
   const workflow = asObject(run?.workflow)
   const workflowRef = asObject(run?.workflowRef)
+  const state = asObject(run?.state)
 
   const workflowId =
     asString(run?.workflowId) ??
+    asString(run?.workflow_id) ??
     asString(workflow?.id) ??
     asString(workflowRef?.id) ??
     asString(workflow?.name) ??
@@ -113,16 +139,28 @@ function mapSmithersRun(workspaceId: string, payload: unknown): Run {
   const startedAt =
     asString(run?.startedAt) ??
     asString(run?.createdAt) ??
-    new Date().toISOString()
+    asString(run?.updatedAt) ??
+    EPOCH_ISO_TIMESTAMP
+
+  const statusValue =
+    asString(run?.status) ??
+    asString(run?.stateKey) ??
+    asString(run?.runState) ??
+    asString(state?.key) ??
+    asString(state?.status)
 
   return {
     id: asString(run?.runId) ?? asString(run?.id) ?? "unknown-run",
     workspaceId,
     workflowId,
     workflowName,
-    status: normalizeStatus(run?.status),
+    status: normalizeStatus(statusValue),
     startedAt,
-    finishedAt: asString(run?.finishedAt) ?? null,
+    finishedAt:
+      asString(run?.finishedAt) ??
+      asString(run?.endedAt) ??
+      asString(run?.completedAt) ??
+      null,
     summary: mapSummary(run?.summary),
   }
 }
@@ -156,7 +194,59 @@ function assertWorkspace(workspaceId: string) {
 }
 
 function resolveWorkflowPath(workspacePath: string, workflowId: string) {
-  return path.join(workspacePath, ".mr-burns", "workflows", workflowId, "workflow.tsx")
+  const workflowDirectory = path.join(workspacePath, ".mr-burns", "workflows", workflowId)
+  const tsxPath = path.join(workflowDirectory, "workflow.tsx")
+  const tsPath = path.join(workflowDirectory, "workflow.ts")
+
+  if (existsSync(tsxPath)) {
+    return tsxPath
+  }
+
+  if (existsSync(tsPath)) {
+    return tsPath
+  }
+
+  return tsxPath
+}
+
+function resolveWorkflowPathFromRun(workspacePath: string, run: unknown) {
+  const runObject = asObject(run)
+  const workflow = asObject(runObject?.workflow)
+  const workflowRef = asObject(runObject?.workflowRef)
+
+  const directWorkflowPath =
+    asString(runObject?.workflowPath) ??
+    asString(runObject?.workflow_path)
+
+  if (directWorkflowPath) {
+    return directWorkflowPath
+  }
+
+  const workflowId =
+    asString(runObject?.workflowId) ??
+    asString(runObject?.workflow_id) ??
+    asString(workflow?.id) ??
+    asString(workflowRef?.id)
+
+  if (!workflowId) {
+    return null
+  }
+
+  return resolveWorkflowPath(workspacePath, workflowId)
+}
+
+function getWorkflowIdFromRun(run: unknown) {
+  const runObject = asObject(run)
+  const workflow = asObject(runObject?.workflow)
+  const workflowRef = asObject(runObject?.workflowRef)
+
+  return (
+    asString(runObject?.workflowId) ??
+    asString(runObject?.workflow_id) ??
+    asString(workflow?.id) ??
+    asString(workflowRef?.id) ??
+    null
+  )
 }
 
 export async function listRuns(workspaceId: string) {
@@ -176,6 +266,7 @@ export async function getRun(workspaceId: string, runId: string) {
 export async function startRun(workspaceId: string, input: StartRunInput) {
   const workspace = assertWorkspace(workspaceId)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
+  repairLegacyDefaultWorkflowTemplate(workspaceId, input.workflowId)
   const workflowPath = resolveWorkflowPath(workspace.path, input.workflowId)
 
   const payload = await createSmithersRun(baseUrl, {
@@ -193,7 +284,21 @@ export async function startRun(workspaceId: string, input: StartRunInput) {
 export async function resumeRun(workspaceId: string, runId: string, input: ResumeRunInput) {
   const workspace = assertWorkspace(workspaceId)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
+  const existingRunPayload = await getSmithersRun(baseUrl, runId)
+  const unwrappedRun = unwrapRun(existingRunPayload)
+  const workflowId = getWorkflowIdFromRun(unwrappedRun)
+  if (workflowId) {
+    repairLegacyDefaultWorkflowTemplate(workspaceId, workflowId)
+  }
+
+  const workflowPath = resolveWorkflowPathFromRun(workspace.path, unwrappedRun)
+
+  if (!workflowPath) {
+    throw new HttpError(422, `Unable to resolve workflowPath for run: ${runId}`)
+  }
+
   const payload = await resumeSmithersRun(baseUrl, runId, {
+    workflowPath,
     input: input.input ?? {},
   })
 
@@ -210,8 +315,13 @@ export async function cancelRun(workspaceId: string, runId: string, input: Cance
   return mapSmithersRun(workspaceId, unwrapRun(payload))
 }
 
-export async function connectRunEventStream(workspaceId: string, runId: string, afterSeq?: number) {
+export async function connectRunEventStream(
+  workspaceId: string,
+  runId: string,
+  afterSeq?: number,
+  signal?: AbortSignal
+) {
   const workspace = assertWorkspace(workspaceId)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
-  return await streamSmithersRunEvents(baseUrl, runId, afterSeq)
+  return await streamSmithersRunEvents(baseUrl, runId, afterSeq, signal)
 }

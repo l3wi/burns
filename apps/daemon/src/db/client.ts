@@ -4,6 +4,10 @@ import { DATABASE_PATH } from "@/config/paths"
 
 export const db = new Database(DATABASE_PATH, { create: true })
 
+// Allow concurrent readers/writers across daemon + tests and reduce flaky SQLITE_BUSY failures.
+db.exec("PRAGMA journal_mode = WAL;")
+db.exec("PRAGMA busy_timeout = 5000;")
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS workspaces (
     id TEXT PRIMARY KEY,

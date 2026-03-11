@@ -25,13 +25,15 @@ export const runSchema = z.object({
   summary: runSummarySchema,
 })
 
+const runInputPayloadSchema = z.record(z.string(), z.unknown())
+
 export const startRunInputSchema = z.object({
   workflowId: z.string().min(1),
-  input: z.unknown().optional(),
+  input: runInputPayloadSchema.optional(),
 })
 
 export const resumeRunInputSchema = z.object({
-  input: z.unknown().optional(),
+  input: runInputPayloadSchema.optional(),
 })
 
 export const cancelRunInputSchema = z.object({

@@ -20,9 +20,11 @@ Implemented today:
 - AI-assisted workflow generation and editing via installed local agent CLIs
 - Web UI for workspaces, workflows, settings, runs, and approvals
 - Smithers-backed run lifecycle APIs (start/list/detail/resume/cancel)
-- Run event persistence in SQLite with SSE proxy streaming
+- Run event persistence in SQLite via background ingestion and SSE proxy streaming
+- SSE reconnect logic in runs detail view using `afterSeq` resume
 - Approval decision APIs (approve/deny) wired from UI
 - Managed per-workspace Smithers server lifecycle (startup, crash restart, graceful shutdown)
+- Workspace server control APIs (`start` / `restart` / `stop` / `status`)
 
 ## Prerequisites
 
@@ -102,6 +104,7 @@ Optional Smithers lifecycle env vars:
 
 - [Codebase Layout](./docs/codebase-layout.md)
 - [Daemon API Reference](./docs/daemon-api-reference.md)
+- [Workspace + Runtime Handoff (Next Agent)](./docs/next-agent-workspace-gaps.md)
 - [Product Spec (target state)](./docs/mr-burns-spec.md)
 
 ## Notes

@@ -1,5 +1,11 @@
 import { createWorkspaceInputSchema } from "@mr-burns/shared"
 
+import {
+  getWorkspaceSmithersServerStatus,
+  restartWorkspaceSmithersServer,
+  startWorkspaceSmithersServer,
+  stopWorkspaceSmithersServer,
+} from "@/services/smithers-instance-service"
 import { getWorkspaceHealth } from "@/services/supervisor-service"
 import { createWorkspace, getWorkspace, listWorkspaces } from "@/services/workspace-service"
 import { HttpError, toErrorResponse } from "@/utils/http-error"
@@ -19,6 +25,31 @@ export async function handleWorkspaceRoutes(request: Request, pathname: string) 
     const healthMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/health$/)
     if (healthMatch && request.method === "GET") {
       return Response.json(getWorkspaceHealth(healthMatch[1]))
+    }
+
+    const workspaceServerStatusMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/server\/status$/
+    )
+    if (workspaceServerStatusMatch && request.method === "GET") {
+      return Response.json(await getWorkspaceSmithersServerStatus(workspaceServerStatusMatch[1]))
+    }
+
+    const workspaceServerActionMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/server\/(start|restart|stop)$/
+    )
+    if (workspaceServerActionMatch && request.method === "POST") {
+      const workspaceId = workspaceServerActionMatch[1]
+      const action = workspaceServerActionMatch[2]
+
+      if (action === "start") {
+        return Response.json(await startWorkspaceSmithersServer(workspaceId))
+      }
+
+      if (action === "restart") {
+        return Response.json(await restartWorkspaceSmithersServer(workspaceId))
+      }
+
+      return Response.json(await stopWorkspaceSmithersServer(workspaceId))
     }
 
     const workspaceMatch = pathname.match(/^\/api\/workspaces\/([^/]+)$/)

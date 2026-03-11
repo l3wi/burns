@@ -12,8 +12,11 @@ import {
   DEFAULT_SMITHERS_PORT_BASE,
 } from "@/config/app-config"
 import { getLogger } from "@/logging/logger"
+import { getWorkspace } from "@/services/workspace-service"
+import { HttpError } from "@/utils/http-error"
 
 type SmithersInstanceStatus = "starting" | "healthy" | "crashed" | "stopped"
+type WorkspaceServerProcessState = SmithersInstanceStatus | "self-managed" | "disabled"
 
 type SmithersInstanceRecord = {
   workspace: Workspace
@@ -23,10 +26,24 @@ type SmithersInstanceRecord = {
   dbPath: string | null
   process: ChildProcess | null
   status: SmithersInstanceStatus
+  restartCount: number
   crashCount: number
+  crashStreak: number
+  lastHeartbeatAt: string | null
   startPromise?: Promise<void>
   restartTimer?: ReturnType<typeof setTimeout>
   stopRequested: boolean
+}
+
+export type WorkspaceServerStatus = {
+  workspaceId: string
+  runtimeMode: Workspace["runtimeMode"]
+  processState: WorkspaceServerProcessState
+  lastHeartbeatAt: string | null
+  restartCount: number
+  crashCount: number
+  port: number | null
+  baseUrl: string | null
 }
 
 const logger = getLogger().child({ component: "smithers.instance.service" })
@@ -38,6 +55,7 @@ const runnerScriptPath = fileURLToPath(new URL("../jobs/smithers-server-runner.t
 const instances = new Map<string, SmithersInstanceRecord>()
 
 let shuttingDown = false
+const HEARTBEAT_PROBE_TIMEOUT_MS = 1_500
 
 function parseEnvInt(rawValue: string | undefined, fallback: number, min: number) {
   if (!rawValue) {
@@ -165,9 +183,33 @@ async function waitForHealthy(baseUrl: string, timeoutMs = 12_000) {
   throw lastError instanceof Error ? lastError : new Error("Timed out waiting for Smithers server")
 }
 
-function computeRestartDelayMs(crashCount: number) {
-  const boundedCrashCount = Math.min(Math.max(crashCount, 1), 6)
-  return Math.min(30_000, 1_000 * 2 ** (boundedCrashCount - 1))
+async function probeSmithersHeartbeat(baseUrl: string, timeoutMs = HEARTBEAT_PROBE_TIMEOUT_MS) {
+  const abortController = new AbortController()
+  const timeout = setTimeout(() => {
+    abortController.abort()
+  }, timeoutMs)
+  timeout.unref()
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/runs?limit=1`, {
+      signal: abortController.signal,
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    return new Date().toISOString()
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function computeRestartDelayMs(crashStreak: number) {
+  const boundedCrashStreak = Math.min(Math.max(crashStreak, 1), 6)
+  return Math.min(30_000, 1_000 * 2 ** (boundedCrashStreak - 1))
 }
 
 function wireProcessLogs(record: SmithersInstanceRecord, child: ChildProcess) {
@@ -215,8 +257,8 @@ function scheduleRestart(record: SmithersInstanceRecord) {
     return
   }
 
-  record.crashCount += 1
-  const delayMs = computeRestartDelayMs(record.crashCount)
+  record.restartCount += 1
+  const delayMs = computeRestartDelayMs(record.crashStreak)
   record.restartTimer = setTimeout(() => {
     record.restartTimer = undefined
     void startRecord(record).catch((error) => {
@@ -238,6 +280,7 @@ function scheduleRestart(record: SmithersInstanceRecord) {
       event: "smithers.instance.restart_scheduled",
       workspaceId: record.workspaceId,
       delayMs,
+      restartCount: record.restartCount,
       crashCount: record.crashCount,
     },
     "Scheduled Smithers workspace restart"
@@ -254,6 +297,8 @@ function onProcessExit(record: SmithersInstanceRecord, child: ChildProcess, code
     return
   }
 
+  record.crashCount += 1
+  record.crashStreak += 1
   record.status = "crashed"
 
   logger.warn(
@@ -353,7 +398,8 @@ async function startRecord(record: SmithersInstanceRecord) {
     try {
       await waitForHealthy(baseUrl)
       record.status = "healthy"
-      record.crashCount = 0
+      record.crashStreak = 0
+      record.lastHeartbeatAt = new Date().toISOString()
     } catch (error) {
       if (record.process?.pid === child.pid) {
         record.process.kill("SIGTERM")
@@ -387,7 +433,10 @@ function getOrCreateRecord(workspace: Workspace) {
     dbPath: null,
     process: null,
     status: "stopped",
+    restartCount: 0,
     crashCount: 0,
+    crashStreak: 0,
+    lastHeartbeatAt: null,
     stopRequested: false,
   }
   instances.set(workspace.id, record)
@@ -426,6 +475,130 @@ async function stopProcess(child: ChildProcess, timeoutMs = 8_000) {
 
     child.kill("SIGTERM")
   })
+}
+
+function parsePortFromBaseUrl(baseUrl: string | null) {
+  if (!baseUrl) {
+    return null
+  }
+
+  try {
+    const url = new URL(baseUrl)
+    if (url.port) {
+      return Number(url.port)
+    }
+
+    return url.protocol === "https:" ? 443 : 80
+  } catch {
+    return null
+  }
+}
+
+function toWorkspaceServerStatus(
+  workspace: Workspace,
+  params: {
+    processState: WorkspaceServerProcessState
+    lastHeartbeatAt: string | null
+    restartCount: number
+    crashCount: number
+    port: number | null
+    baseUrl: string | null
+  }
+): WorkspaceServerStatus {
+  return {
+    workspaceId: workspace.id,
+    runtimeMode: workspace.runtimeMode,
+    processState: params.processState,
+    lastHeartbeatAt: params.lastHeartbeatAt,
+    restartCount: params.restartCount,
+    crashCount: params.crashCount,
+    port: params.port,
+    baseUrl: params.baseUrl,
+  }
+}
+
+async function toSelfManagedStatus(workspace: Workspace) {
+  const baseUrl = workspace.smithersBaseUrl ?? null
+  const lastHeartbeatAt = baseUrl ? await probeSmithersHeartbeat(baseUrl) : null
+  return toWorkspaceServerStatus(workspace, {
+    processState: "self-managed",
+    lastHeartbeatAt,
+    restartCount: 0,
+    crashCount: 0,
+    port: parsePortFromBaseUrl(baseUrl),
+    baseUrl,
+  })
+}
+
+function toDisabledStatus(workspace: Workspace) {
+  const baseUrl = resolveFallbackBaseUrl()
+  return toWorkspaceServerStatus(workspace, {
+    processState: "disabled",
+    lastHeartbeatAt: null,
+    restartCount: 0,
+    crashCount: 0,
+    port: parsePortFromBaseUrl(baseUrl),
+    baseUrl,
+  })
+}
+
+function toManagedRecordStatus(record: SmithersInstanceRecord) {
+  return toWorkspaceServerStatus(record.workspace, {
+    processState: record.status,
+    lastHeartbeatAt: record.lastHeartbeatAt,
+    restartCount: record.restartCount,
+    crashCount: record.crashCount,
+    port: record.port,
+    baseUrl: record.baseUrl,
+  })
+}
+
+async function refreshManagedRecordHeartbeat(record: SmithersInstanceRecord) {
+  if (!record.baseUrl) {
+    return
+  }
+
+  if (record.status !== "healthy" && record.status !== "starting") {
+    return
+  }
+
+  const heartbeatAt = await probeSmithersHeartbeat(record.baseUrl)
+  if (!heartbeatAt) {
+    return
+  }
+
+  record.lastHeartbeatAt = heartbeatAt
+  record.status = "healthy"
+}
+
+function assertWorkspaceRecord(workspaceId: string) {
+  const workspace = getWorkspace(workspaceId)
+  if (!workspace) {
+    throw new HttpError(404, `Workspace not found: ${workspaceId}`)
+  }
+
+  return workspace
+}
+
+async function stopRecord(record: SmithersInstanceRecord) {
+  record.stopRequested = true
+
+  if (record.restartTimer) {
+    clearTimeout(record.restartTimer)
+    record.restartTimer = undefined
+  }
+
+  const child = record.process
+  record.process = null
+
+  if (child) {
+    await stopProcess(child)
+  }
+
+  record.baseUrl = null
+  record.port = null
+  record.lastHeartbeatAt = null
+  record.status = "stopped"
 }
 
 export function isWorkspaceSmithersManaged() {
@@ -479,6 +652,73 @@ export async function ensureWorkspaceSmithersBaseUrl(workspace: Workspace) {
   return record.baseUrl
 }
 
+export async function getWorkspaceSmithersServerStatus(workspaceId: string) {
+  const workspace = assertWorkspaceRecord(workspaceId)
+
+  if (workspace.runtimeMode === "self-managed") {
+    return await toSelfManagedStatus(workspace)
+  }
+
+  if (!managedModeEnabled) {
+    return toDisabledStatus(workspace)
+  }
+
+  const record = getOrCreateRecord(workspace)
+  await refreshManagedRecordHeartbeat(record)
+  return toManagedRecordStatus(record)
+}
+
+export async function startWorkspaceSmithersServer(workspaceId: string) {
+  const workspace = assertWorkspaceRecord(workspaceId)
+
+  if (workspace.runtimeMode === "self-managed") {
+    return await toSelfManagedStatus(workspace)
+  }
+
+  if (!managedModeEnabled) {
+    return toDisabledStatus(workspace)
+  }
+
+  const record = getOrCreateRecord(workspace)
+  await startRecord(record)
+  return toManagedRecordStatus(record)
+}
+
+export async function restartWorkspaceSmithersServer(workspaceId: string) {
+  const workspace = assertWorkspaceRecord(workspaceId)
+
+  if (workspace.runtimeMode === "self-managed") {
+    return await toSelfManagedStatus(workspace)
+  }
+
+  if (!managedModeEnabled) {
+    return toDisabledStatus(workspace)
+  }
+
+  const record = getOrCreateRecord(workspace)
+  record.restartCount += 1
+  await stopRecord(record)
+  record.stopRequested = false
+  await startRecord(record)
+  return toManagedRecordStatus(record)
+}
+
+export async function stopWorkspaceSmithersServer(workspaceId: string) {
+  const workspace = assertWorkspaceRecord(workspaceId)
+
+  if (workspace.runtimeMode === "self-managed") {
+    return await toSelfManagedStatus(workspace)
+  }
+
+  if (!managedModeEnabled) {
+    return toDisabledStatus(workspace)
+  }
+
+  const record = getOrCreateRecord(workspace)
+  await stopRecord(record)
+  return toManagedRecordStatus(record)
+}
+
 export async function warmWorkspaceSmithersInstances(workspaces: Workspace[]) {
   if (!managedModeEnabled || workspaces.length === 0) {
     return
@@ -526,21 +766,7 @@ export async function shutdownWorkspaceSmithersInstances() {
   shuttingDown = true
 
   const stopTasks = [...instances.values()].map(async (record) => {
-    record.stopRequested = true
-
-    if (record.restartTimer) {
-      clearTimeout(record.restartTimer)
-      record.restartTimer = undefined
-    }
-
-    const child = record.process
-    record.process = null
-
-    if (child) {
-      await stopProcess(child)
-    }
-
-    record.status = "stopped"
+    await stopRecord(record)
   })
 
   await Promise.allSettled(stopTasks)

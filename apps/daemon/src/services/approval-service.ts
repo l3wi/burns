@@ -3,34 +3,15 @@ import { randomUUID } from "node:crypto"
 import type { Approval, ApprovalDecisionInput } from "@mr-burns/shared"
 
 import {
-  countApprovalRows,
   findApprovalRow,
   listApprovalRowsByWorkspace,
   upsertApprovalRow,
 } from "@/db/repositories/approval-repository"
-import { approvals as mockApprovals } from "@/domain/workspaces/mock-data"
 import { approveSmithersNode, denySmithersNode } from "@/integrations/smithers/http-client"
 import { appendRunEvent } from "@/services/run-event-service"
 import { ensureWorkspaceSmithersBaseUrl } from "@/services/smithers-instance-service"
 import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
-
-let didSeedApprovals = false
-
-function ensureApprovalsSeeded() {
-  if (didSeedApprovals) {
-    return
-  }
-
-  didSeedApprovals = true
-  if (countApprovalRows() > 0) {
-    return
-  }
-
-  for (const approval of mockApprovals) {
-    upsertApprovalRow(approval)
-  }
-}
 
 function assertWorkspaceExists(workspaceId: string) {
   const workspace = getWorkspace(workspaceId)
@@ -67,7 +48,6 @@ function ensurePendingApproval(params: {
 
 export function listApprovals(workspaceId: string) {
   assertWorkspaceExists(workspaceId)
-  ensureApprovalsSeeded()
   return listApprovalRowsByWorkspace(workspaceId)
 }
 
@@ -79,7 +59,6 @@ export function upsertPendingApproval(params: {
   note?: string
 }) {
   assertWorkspaceExists(params.workspaceId)
-  ensureApprovalsSeeded()
   return ensurePendingApproval(params)
 }
 
@@ -91,7 +70,6 @@ export function syncApprovalFromEvent(params: {
   message?: string
 }) {
   assertWorkspaceExists(params.workspaceId)
-  ensureApprovalsSeeded()
 
   const existing = ensurePendingApproval({
     workspaceId: params.workspaceId,
@@ -122,8 +100,7 @@ export async function decideApproval(params: {
 }) {
   const workspace = assertWorkspaceExists(params.workspaceId)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
-  ensureApprovalsSeeded()
-  ensurePendingApproval({
+  const existingApproval = ensurePendingApproval({
     workspaceId: params.workspaceId,
     runId: params.runId,
     nodeId: params.nodeId,
@@ -142,7 +119,7 @@ export async function decideApproval(params: {
 
   const decidedAt = new Date().toISOString()
   const updatedApproval = upsertApprovalRow({
-    id: `approval-${params.workspaceId}-${params.runId}-${params.nodeId}`,
+    id: existingApproval.id,
     workspaceId: params.workspaceId,
     runId: params.runId,
     nodeId: params.nodeId,

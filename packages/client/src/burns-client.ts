@@ -22,11 +22,14 @@ import {
   workflowDocumentSchema,
   workflowSchema,
   type Workspace,
+  type WorkspaceServerStatus,
+  workspaceServerStatusSchema,
   workspaceSchema,
 } from "@mr-burns/shared"
 import { z } from "zod"
 
 const workspaceListSchema = z.array(workspaceSchema)
+const workspaceServerStatusDtoSchema = workspaceServerStatusSchema
 const workflowListSchema = z.array(workflowSchema)
 const workflowDocumentListSchema = workflowDocumentSchema
 const agentCliListSchema = z.array(agentCliSchema)
@@ -41,6 +44,32 @@ const validateSmithersUrlResponseSchema = z.object({
   status: z.number().nullable(),
   message: z.string(),
 })
+
+function extractErrorMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null
+  }
+
+  const objectPayload = payload as Record<string, unknown>
+  const directError = objectPayload.error
+  if (typeof directError === "string" && directError.trim()) {
+    return directError
+  }
+
+  if (directError && typeof directError === "object") {
+    const nestedMessage = (directError as Record<string, unknown>).message
+    if (typeof nestedMessage === "string" && nestedMessage.trim()) {
+      return nestedMessage
+    }
+  }
+
+  const directMessage = objectPayload.message
+  if (typeof directMessage === "string" && directMessage.trim()) {
+    return directMessage
+  }
+
+  return null
+}
 
 export class BurnsClient {
   private readonly baseUrl: string
@@ -74,6 +103,32 @@ export class BurnsClient {
     })
 
     return workspaceSchema.parse(data)
+  }
+
+  async getWorkspaceServerStatus(workspaceId: string): Promise<WorkspaceServerStatus> {
+    const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/server/status`)
+    return workspaceServerStatusDtoSchema.parse(data)
+  }
+
+  async startWorkspaceServer(workspaceId: string): Promise<WorkspaceServerStatus> {
+    const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/server/start`, {
+      method: "POST",
+    })
+    return workspaceServerStatusDtoSchema.parse(data)
+  }
+
+  async restartWorkspaceServer(workspaceId: string): Promise<WorkspaceServerStatus> {
+    const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/server/restart`, {
+      method: "POST",
+    })
+    return workspaceServerStatusDtoSchema.parse(data)
+  }
+
+  async stopWorkspaceServer(workspaceId: string): Promise<WorkspaceServerStatus> {
+    const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/server/stop`, {
+      method: "POST",
+    })
+    return workspaceServerStatusDtoSchema.parse(data)
   }
 
   async getSettings(): Promise<Settings> {
@@ -284,9 +339,10 @@ export class BurnsClient {
       let message = `Burns API request failed: ${response.status}`
 
       try {
-        const errorBody = (await response.json()) as { error?: string }
-        if (errorBody.error) {
-          message = errorBody.error
+        const errorBody = (await response.json()) as unknown
+        const parsedMessage = extractErrorMessage(errorBody)
+        if (parsedMessage) {
+          message = parsedMessage
         }
       } catch {
         // Ignore invalid JSON error bodies.

@@ -12,11 +12,38 @@ function buildSmithersUrl(baseUrl: string, pathname: string, searchParams?: URLS
 
 async function parseErrorMessage(response: Response) {
   try {
-    const data = (await response.json()) as { error?: string; message?: string }
-    return data.error ?? data.message ?? `Smithers request failed: ${response.status}`
+    const data = (await response.json()) as unknown
+    const message = extractErrorMessage(data)
+    return message ?? `Smithers request failed: ${response.status}`
   } catch {
     return `Smithers request failed: ${response.status}`
   }
+}
+
+function extractErrorMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null
+  }
+
+  const objectPayload = payload as Record<string, unknown>
+  const directError = objectPayload.error
+  if (typeof directError === "string" && directError.trim()) {
+    return directError
+  }
+
+  if (directError && typeof directError === "object") {
+    const nestedMessage = (directError as Record<string, unknown>).message
+    if (typeof nestedMessage === "string" && nestedMessage.trim()) {
+      return nestedMessage
+    }
+  }
+
+  const directMessage = objectPayload.message
+  if (typeof directMessage === "string" && directMessage.trim()) {
+    return directMessage
+  }
+
+  return null
 }
 
 async function requestJson<T>(baseUrl: string, pathname: string, init?: RequestInit): Promise<T> {
@@ -88,7 +115,12 @@ export async function denySmithersNode(
   })
 }
 
-export async function streamSmithersRunEvents(baseUrl: string, runId: string, afterSeq?: number) {
+export async function streamSmithersRunEvents(
+  baseUrl: string,
+  runId: string,
+  afterSeq?: number,
+  signal?: AbortSignal
+) {
   const searchParams = new URLSearchParams()
   if (afterSeq !== undefined) {
     searchParams.set("afterSeq", String(afterSeq))
@@ -100,6 +132,7 @@ export async function streamSmithersRunEvents(baseUrl: string, runId: string, af
       headers: {
         accept: "text/event-stream",
       },
+      signal,
     }
   )
 

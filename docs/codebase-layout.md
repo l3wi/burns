@@ -96,3 +96,11 @@ Reserved package for shared linting/TypeScript config. It is present but intenti
 3. Daemon route handlers validate request bodies (where applicable) with shared schemas.
 4. Daemon services interact with SQLite, local filesystem, git, and optional agent CLIs.
 5. Results are returned as JSON and cached in TanStack Query on the frontend.
+
+## Workspace UI behavior (current)
+
+- Overview route provides workspace summary cards for branch, workflows, active runs, and approvals.
+- Runs route supports one-click run starts per workflow and run list navigation to run detail.
+- Run detail consumes persisted event history and attaches SSE with reconnect using `afterSeq`.
+- Approvals route provides pending approval actions (approve/deny) with operator attribution.
+- Workspace server control calls (`status`, `start`, `restart`, `stop`) are exposed in the client API and backed by daemon routes.

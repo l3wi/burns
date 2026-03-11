@@ -9,6 +9,35 @@ import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
 import { slugify } from "@/utils/slugify"
 
+const workflowPromptScaffold = `import { createSmithers, Sequence } from "smithers-orchestrator"
+import { z } from "zod"
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  plan: z.object({ summary: z.string() }),
+  implement: z.object({ summary: z.string() }),
+  validate: z.object({ summary: z.string() }),
+})
+
+export default smithers((ctx) => (
+  <Workflow name="example-workflow">
+    <Sequence>
+      <Task id="plan" output={outputs.plan}>
+        {{ summary: \`Plan for input: \${JSON.stringify(ctx.input ?? {})}\` }}
+      </Task>
+      <Task id="implement" output={outputs.implement}>
+        {{ summary: "Implementation complete." }}
+      </Task>
+      <Task id="validate" output={outputs.validate}>
+        {{ summary: "Validation complete." }}
+      </Task>
+    </Sequence>
+  </Workflow>
+))`
+
+const defaultTemplateById = new Map<string, string>(
+  defaultWorkflowTemplates.map((template) => [template.id, template.source])
+)
+
 function getWorkflowRoot(workspaceId: string) {
   const workspace = getWorkspace(workspaceId)
 
@@ -40,6 +69,55 @@ function stripCodeFences(source: string) {
   return source.trim()
 }
 
+function isLegacyBareSmithersSource(source: string) {
+  return (
+    /export\s+default\s+smithers\s*\(/.test(source) &&
+    !/createSmithers/.test(source)
+  )
+}
+
+function assertWorkflowSourceIsValid(source: string) {
+  if (!source.trim()) {
+    throw new HttpError(400, "Workflow source cannot be empty")
+  }
+
+  if (!/from\s+["']smithers-orchestrator["']/.test(source)) {
+    throw new HttpError(400, "Workflow must import from smithers-orchestrator")
+  }
+
+  if (!/createSmithers/.test(source)) {
+    throw new HttpError(
+      400,
+      "Workflow must define smithers via createSmithers(...) before export default"
+    )
+  }
+
+  if (!/export\s+default\s+smithers\s*\(/.test(source)) {
+    throw new HttpError(400, "Workflow must default export smithers((ctx) => (...))")
+  }
+
+  if (!/<Workflow\b/.test(source) || !/<Task\b/.test(source)) {
+    throw new HttpError(400, "Workflow must contain <Workflow> and at least one <Task>")
+  }
+
+  if (!/output\s*=\s*{outputs\.[a-zA-Z0-9_]+}/.test(source)) {
+    throw new HttpError(400, "Each task output should use output={outputs.<schemaKey>}")
+  }
+
+  if (/output\s*=\s*["'][^"']+["']/.test(source)) {
+    throw new HttpError(
+      400,
+      "String task outputs are not valid. Use output={outputs.<schemaKey>} from createSmithers."
+    )
+  }
+}
+
+function normalizeAndValidateWorkflowSource(source: string) {
+  const normalizedSource = `${stripCodeFences(source)}\n`
+  assertWorkflowSourceIsValid(normalizedSource)
+  return normalizedSource
+}
+
 function buildWorkflowGenerationPrompt(params: {
   workflowName: string
   workflowId: string
@@ -60,7 +138,12 @@ function buildWorkflowGenerationPrompt(params: {
     "The file must contain a default export that defines a valid Smithers workflow in TypeScript/TSX.",
     "Prefer a simple but production-leaning structure with clear plan/implement/validate style tasks when relevant.",
     "If the user asks for approval steps, use needsApproval on the relevant task.",
+    "Do not use a bare global smithers symbol. Always define it from createSmithers(...).",
+    "Always import createSmithers from smithers-orchestrator and z from zod.",
+    "Always define output schemas and reference outputs with output={outputs.<schemaKey>}.",
     "Create any missing folders needed for the target file.",
+    "Use this scaffold shape and adapt IDs/schemas/prompts:",
+    `\`\`\`tsx\n${workflowPromptScaffold}\n\`\`\``,
     "User request:",
     params.userPrompt,
   ].join("\n\n")
@@ -88,6 +171,11 @@ function buildWorkflowEditPrompt(params: {
     `Workspace path: ${params.workspacePath}`,
     "The file must continue to contain a default export that defines a valid Smithers workflow in TypeScript/TSX.",
     "If the user asks for approval steps, use needsApproval on the relevant task.",
+    "Do not use a bare global smithers symbol. Always define it from createSmithers(...).",
+    "Always import createSmithers from smithers-orchestrator and z from zod.",
+    "Always define output schemas and reference outputs with output={outputs.<schemaKey>}.",
+    "Use this scaffold shape when rewriting if needed:",
+    `\`\`\`tsx\n${workflowPromptScaffold}\n\`\`\``,
     "User request:",
     params.userPrompt,
   ].join("\n\n")
@@ -187,8 +275,10 @@ export function saveWorkflow(workspaceId: string, workflowId: string, source: st
   const workflowDir = path.join(workflowRoot, workflowId)
   const filePath = path.join(workflowDir, "workflow.tsx")
 
+  const normalizedSource = normalizeAndValidateWorkflowSource(source)
+
   mkdirSync(workflowDir, { recursive: true })
-  writeFileSync(filePath, source, "utf8")
+  writeFileSync(filePath, normalizedSource, "utf8")
 
   return getWorkflow(workspaceId, workflowId)
 }
@@ -214,12 +304,38 @@ function finalizeWorkflowFile(workspaceId: string, workflowId: string, filePath:
     throw new HttpError(500, `Generated workflow file is empty: ${filePath}`)
   }
 
-  const normalizedSource = `${stripCodeFences(existingSource)}\n`
+  const normalizedSource = normalizeAndValidateWorkflowSource(existingSource)
   if (normalizedSource !== existingSource) {
     writeFileSync(filePath, normalizedSource, "utf8")
   }
 
   return getWorkflow(workspaceId, workflowId)
+}
+
+export function repairLegacyDefaultWorkflowTemplate(
+  workspaceId: string,
+  workflowId: string
+) {
+  const replacementSource = defaultTemplateById.get(workflowId)
+  if (!replacementSource) {
+    return false
+  }
+
+  let filePath: string
+  try {
+    filePath = getWorkflowFilePath(workspaceId, workflowId)
+  } catch {
+    return false
+  }
+
+  const existingSource = readFileSync(filePath, "utf8")
+  if (!isLegacyBareSmithersSource(existingSource)) {
+    return false
+  }
+
+  const normalizedReplacement = normalizeAndValidateWorkflowSource(replacementSource)
+  writeFileSync(filePath, normalizedReplacement, "utf8")
+  return true
 }
 
 export async function generateWorkflowFromPrompt(params: {

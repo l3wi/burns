@@ -9,6 +9,14 @@ export const workspaceHealthStatusSchema = z.enum([
 
 export const workspaceSourceTypeSchema = z.enum(["local", "clone", "create"])
 export const workspaceRuntimeModeSchema = z.enum(["burns-managed", "self-managed"])
+export const workspaceServerProcessStateSchema = z.enum([
+  "starting",
+  "healthy",
+  "crashed",
+  "stopped",
+  "self-managed",
+  "disabled",
+])
 
 export const workspaceSchema = z.object({
   id: z.string(),
@@ -23,6 +31,17 @@ export const workspaceSchema = z.object({
   smithersBaseUrl: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+})
+
+export const workspaceServerStatusSchema = z.object({
+  workspaceId: z.string(),
+  runtimeMode: workspaceRuntimeModeSchema,
+  processState: workspaceServerProcessStateSchema,
+  lastHeartbeatAt: z.string().nullable(),
+  restartCount: z.number().int().nonnegative(),
+  crashCount: z.number().int().nonnegative(),
+  port: z.number().int().positive().nullable(),
+  baseUrl: z.string().nullable(),
 })
 
 export const createWorkspaceInputSchema = z.discriminatedUnion("sourceType", [
@@ -60,4 +79,6 @@ export type Workspace = z.infer<typeof workspaceSchema>
 export type WorkspaceHealthStatus = z.infer<typeof workspaceHealthStatusSchema>
 export type WorkspaceSourceType = z.infer<typeof workspaceSourceTypeSchema>
 export type WorkspaceRuntimeMode = z.infer<typeof workspaceRuntimeModeSchema>
+export type WorkspaceServerProcessState = z.infer<typeof workspaceServerProcessStateSchema>
+export type WorkspaceServerStatus = z.infer<typeof workspaceServerStatusSchema>
 export type CreateWorkspaceInput = z.infer<typeof createWorkspaceInputSchema>

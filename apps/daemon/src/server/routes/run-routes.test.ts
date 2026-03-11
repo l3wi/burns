@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
@@ -40,6 +40,26 @@ function writeWorkflowFile(workspaceId: string, workflowId: string, extension: "
   )
   mkdirSync(workflowPath, { recursive: true })
   writeFileSync(path.join(workflowPath, `workflow.${extension}`), "export default {}", "utf8")
+}
+
+function writeLegacyWorkflowTemplate(workspaceId: string, workflowId: string) {
+  const workflowPath = path.join(
+    "/tmp",
+    workspaceId,
+    ".mr-burns",
+    "workflows",
+    workflowId
+  )
+  mkdirSync(workflowPath, { recursive: true })
+  writeFileSync(
+    path.join(workflowPath, "workflow.tsx"),
+    `export default smithers(() => (
+  <Workflow name="${workflowId}">
+    <Task id="plan" output="plan">Legacy template</Task>
+  </Workflow>
+))`,
+    "utf8"
+  )
 }
 
 function createSmithersSseResponse(frames: string[]) {
@@ -453,5 +473,139 @@ describe("run routes", () => {
         message: "Done",
       },
     ])
+  })
+
+  it("forwards afterSeq to Smithers event stream requests", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+    let capturedStreamUrl = ""
+
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method ?? "GET"
+
+      if (url.includes("/v1/runs/run-stream/events") && method === "GET") {
+        capturedStreamUrl = url
+        return createSmithersSseResponse([
+          'event: smithers\ndata: {"seq":8,"runId":"run-stream","type":"smithers.event","message":"event"}',
+        ])
+      }
+
+      return new Response(null, { status: 404 })
+    }) as typeof fetch
+
+    const response = await app.fetch(
+      new Request(
+        `http://localhost:7332/api/workspaces/${workspaceId}/runs/run-stream/events/stream?afterSeq=7`,
+        {
+          method: "GET",
+        }
+      )
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain("event: smithers")
+    expect(capturedStreamUrl).toContain("/v1/runs/run-stream/events")
+    expect(capturedStreamUrl).toContain("afterSeq=7")
+  })
+
+  it("surfaces nested Smithers error messages instead of object coercion", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+    writeWorkflowFile(workspaceId, "issue-to-pr", "tsx")
+
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method ?? "GET"
+
+      if (url.endsWith("/v1/runs") && method === "POST") {
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: "Workflow failed validation",
+            },
+          }),
+          {
+            status: 422,
+            headers: { "content-type": "application/json" },
+          }
+        )
+      }
+
+      return new Response(null, { status: 404 })
+    }) as unknown as typeof fetch
+
+    const response = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workflowId: "issue-to-pr",
+          input: {},
+        }),
+      })
+    )
+
+    expect(response.status).toBe(422)
+    expect(await response.json()).toMatchObject({
+      error: "Workflow failed validation",
+    })
+  })
+
+  it("repairs legacy default templates before starting a run", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+    writeLegacyWorkflowTemplate(workspaceId, "issue-to-pr")
+
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method ?? "GET"
+
+      if (url.endsWith("/v1/runs") && method === "POST") {
+        return Response.json({
+          run: {
+            id: "run-repair-1",
+            workflowId: "issue-to-pr",
+            workflowName: "issue-to-pr",
+            status: "running",
+            startedAt: "2026-03-11T11:00:00.000Z",
+            summary: {
+              finished: 0,
+              inProgress: 1,
+              pending: 0,
+            },
+          },
+        })
+      }
+
+      return new Response(null, { status: 404 })
+    }) as unknown as typeof fetch
+
+    const response = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workflowId: "issue-to-pr",
+          input: {},
+        }),
+      })
+    )
+
+    expect(response.status).toBe(201)
+
+    const repairedSource = readFileSync(
+      path.join(
+        "/tmp",
+        workspaceId,
+        ".mr-burns",
+        "workflows",
+        "issue-to-pr",
+        "workflow.tsx"
+      ),
+      "utf8"
+    )
+    expect(repairedSource).toContain("createSmithers")
+    expect(repairedSource).toContain("output={outputs.plan}")
   })
 })

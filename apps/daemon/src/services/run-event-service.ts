@@ -37,6 +37,10 @@ export function listRunEvents(workspaceId: string, runId: string, afterSeq = 0) 
   return listRunEventRows(workspaceId, runId, afterSeq)
 }
 
+export function getLatestRunEventSeq(workspaceId: string, runId: string) {
+  return getMaxRunEventSeq(workspaceId, runId)
+}
+
 export function appendRunEvent(
   workspaceId: string,
   runId: string,
