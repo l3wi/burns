@@ -1,19 +1,24 @@
-import { useMemo, useState } from "react"
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from "react"
 import { useNavigate } from "react-router-dom"
 
 import type { CreateWorkspaceInput, WorkspaceSourceType } from "@mr-burns/shared"
+import { FolderOpenIcon } from "lucide-react"
 
-import { PageHeader } from "@/components/app-shell/page-header"
-import { Badge } from "@/components/ui/badge"
+import {
+  Combobox11,
+  type Combobox11Option,
+} from "@/components/shadcn-studio/combobox/combobox-11"
 import { Button } from "@/components/ui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+  FieldDescription,
+  FieldLabel,
+} from "@/components/ui/field"
 import {
   Select,
   SelectContent,
@@ -22,10 +27,151 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { useSettings } from "@/features/settings/hooks/use-settings"
 import { useCreateWorkspace } from "@/features/workspaces/hooks/use-create-workspace"
 
-const steps = ["Workspace", "Source", "Workflows", "Confirm"]
+const workflowTemplateOptions = [
+  { value: "issue-to-pr", label: "Issue to PR" },
+  { value: "pr-feedback", label: "PR feedback" },
+  { value: "approval-gate", label: "Approval gate" },
+] satisfies Combobox11Option[]
+
+type WorkspaceSourceMode = Extract<WorkspaceSourceType, "clone" | "create">
+
+type NativeFolderPickerFieldProps = {
+  id: string
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  pickerLabel: string
+}
+
+type FileWithPath = File & {
+  webkitRelativePath?: string
+}
+
+function extractFolderSelection(files: FileList) {
+  const first = files.item(0) as FileWithPath | null
+  if (!first) {
+    return ""
+  }
+
+  const relativePath = first.webkitRelativePath ?? ""
+  return relativePath.split("/").filter(Boolean)[0] ?? ""
+}
+
+function NativeFolderPickerField({
+  id,
+  value,
+  onChange,
+  placeholder,
+  pickerLabel,
+}: NativeFolderPickerFieldProps) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [pickerNote, setPickerNote] = useState<string>("")
+
+  useEffect(() => {
+    const input = inputRef.current
+    if (!input) {
+      return
+    }
+
+    input.setAttribute("webkitdirectory", "")
+    input.setAttribute("directory", "")
+  }, [])
+
+  async function handleBrowseClick() {
+    if (typeof window !== "undefined" && "showDirectoryPicker" in window) {
+      try {
+        const picker = window as Window & {
+          showDirectoryPicker?: () => Promise<{ name: string }>
+        }
+        const selectedDirectory = await picker.showDirectoryPicker?.()
+
+        if (selectedDirectory?.name) {
+          onChange(selectedDirectory.name)
+          setPickerNote("")
+        }
+
+        return
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return
+        }
+      }
+    }
+
+    inputRef.current?.click()
+  }
+
+  function handleInputPickerChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = event.currentTarget.files
+    if (!files?.length) {
+      return
+    }
+
+    const selectedFolder = extractFolderSelection(files)
+    if (selectedFolder) {
+      onChange(selectedFolder)
+      setPickerNote("")
+    } else {
+      setPickerNote("Could not determine selected folder name from browser picker.")
+    }
+
+    event.currentTarget.value = ""
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+        />
+        <Button type="button" variant="outline" onClick={() => void handleBrowseClick()}>
+          <FolderOpenIcon data-icon="inline-start" />
+          {pickerLabel}
+        </Button>
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          multiple
+          onChange={handleInputPickerChange}
+        />
+      </div>
+      {pickerNote ? <FieldDescription>{pickerNote}</FieldDescription> : null}
+    </div>
+  )
+}
+
+type FormRowProps = {
+  label: string
+  htmlFor?: string
+  description?: ReactNode
+  children: ReactNode
+}
+
+function FormRow({ label, htmlFor, description, children }: FormRowProps) {
+  return (
+    <div className="grid gap-3 border-b py-4 md:grid-cols-[12rem_minmax(0,1fr)] md:items-start md:gap-6">
+      <div className="space-y-1">
+        <FieldLabel htmlFor={htmlFor} className="text-sm md:pt-2">
+          {label}
+        </FieldLabel>
+      </div>
+      <div className="space-y-1.5">
+        {children}
+        {description ? (
+          <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
+        ) : null}
+      </div>
+    </div>
+  )
+}
 
 export function AddWorkspacePage() {
   const navigate = useNavigate()
@@ -33,166 +179,137 @@ export function AddWorkspacePage() {
   const createWorkspace = useCreateWorkspace()
 
   const [name, setName] = useState("burns-web-app")
-  const [sourceType, setSourceType] = useState<WorkspaceSourceType>("create")
+  const [sourceType, setSourceType] = useState<WorkspaceSourceMode>("create")
   const [sourceValue, setSourceValue] = useState("")
   const [targetFolder, setTargetFolder] = useState("burns-web-app")
-
-  const sourceLabel = useMemo(() => {
-    if (sourceType === "local") {
-      return "Local repo path"
-    }
-
-    if (sourceType === "clone") {
-      return "Repository URL"
-    }
-
-    return "Target folder"
-  }, [sourceType])
+  const [selectedWorkflowTemplateIds, setSelectedWorkflowTemplateIds] = useState(
+    workflowTemplateOptions.map((option) => option.value)
+  )
 
   async function handleCreateWorkspace() {
-    const payload: CreateWorkspaceInput =
-      sourceType === "local"
-        ? {
-            name,
-            sourceType,
-            localPath: sourceValue,
-          }
-        : sourceType === "clone"
-          ? {
-              name,
-              sourceType,
-              repoUrl: sourceValue,
-              targetFolder,
-            }
-          : {
-              name,
-              sourceType,
-              targetFolder,
-            }
+    const payload: CreateWorkspaceInput = sourceType === "clone"
+      ? {
+          name,
+          sourceType,
+          repoUrl: sourceValue,
+          targetFolder,
+          workflowTemplateIds: selectedWorkflowTemplateIds,
+        }
+      : {
+          name,
+          sourceType,
+          targetFolder,
+          workflowTemplateIds: selectedWorkflowTemplateIds,
+        }
 
     const workspace = await createWorkspace.mutateAsync(payload)
     navigate(`/w/${workspace.id}/overview`)
   }
 
+  const isCreateDisabled =
+    createWorkspace.isPending ||
+    !name.trim() ||
+    (sourceType === "clone" && (!sourceValue.trim() || !targetFolder.trim())) ||
+    (sourceType === "create" && !targetFolder.trim())
+
   return (
-    <div className="flex flex-col">
-      <PageHeader
-        title="Add workspace"
-        description="Create a new managed workspace with repo source and workflow selection."
-      />
-      <div className="flex flex-col gap-4 p-6">
-        <Card>
-          <CardContent className="flex items-center gap-3 pt-4">
-            {steps.map((step, index) => (
-              <div key={step} className="flex items-center gap-3">
-                <Badge variant={index === 0 ? "default" : "secondary"}>{index + 1}</Badge>
-                <span className="text-sm font-medium">{step}</span>
+    <div className="flex flex-col p-6">
+      <div className="mx-auto w-full max-w-4xl rounded-xl border bg-card">
+        <div className="border-b px-6 py-5">
+          <h1 className="text-xl font-semibold tracking-tight">Create workspace</h1>
+          <p className="text-sm text-muted-foreground">
+            Set a title, pick a source, choose the folder, and confirm.
+          </p>
+        </div>
+
+        <div className="px-6">
+          <FormRow
+            label="Title"
+            htmlFor="workspace-name"
+            description="Displayed in the workspace list."
+          >
+            <Input
+              id="workspace-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Workspace title"
+            />
+          </FormRow>
+
+          <FormRow label="Source" description="Start from a new repo or clone from URL.">
+            <Select
+              value={sourceType}
+              onValueChange={(value) => setSourceType(value as WorkspaceSourceMode)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Choose source mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="create">Create new repo</SelectItem>
+                  <SelectItem value="clone">Clone repository</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </FormRow>
+
+          {sourceType === "clone" ? (
+            <FormRow
+              label="Repository URL"
+              htmlFor="workspace-repo-url"
+              description="HTTPS or SSH Git URL."
+            >
+              <Input
+                id="workspace-repo-url"
+                value={sourceValue}
+                onChange={(event) => setSourceValue(event.target.value)}
+                placeholder="https://github.com/acme/burns-web-app.git"
+              />
+            </FormRow>
+          ) : null}
+
+          <FormRow
+            label="Target folder"
+            htmlFor="workspace-target-folder"
+            description={`Workspace root: ${settings?.workspaceRoot ?? "Loading..."}`}
+          >
+            <NativeFolderPickerField
+              id="workspace-target-folder"
+              value={targetFolder}
+              onChange={setTargetFolder}
+              placeholder="burns-web-app"
+              pickerLabel="Choose"
+            />
+          </FormRow>
+
+          <FormRow
+            label="Workflows"
+            description="Select templates to pre-seed in .mr-burns/workflows."
+          >
+            <Combobox11
+              className="max-w-full"
+              label=""
+              placeholder="Select workflow templates"
+              searchPlaceholder="Search workflow template..."
+              emptyLabel="No workflow template found."
+              options={workflowTemplateOptions}
+              selectedValues={selectedWorkflowTemplateIds}
+              onChange={setSelectedWorkflowTemplateIds}
+            />
+          </FormRow>
+
+          {createWorkspace.error ? (
+            <div className="py-4">
+              <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {createWorkspace.error.message}
               </div>
-            ))}
-          </CardContent>
-        </Card>
+            </div>
+          ) : null}
 
-        <div className="grid gap-4 xl:grid-cols-[1fr_22rem]">
-          <Card>
-            <CardHeader>
-              <CardTitle>Create a workspace</CardTitle>
-              <CardDescription>
-                Start with a repo source and bootstrap the workspace folder.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <p className="text-sm font-medium">Workspace name</p>
-                <Input value={name} onChange={(event) => setName(event.target.value)} />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <p className="text-sm font-medium">Source mode</p>
-                <Select
-                  value={sourceType}
-                  onValueChange={(value) => setSourceType(value as WorkspaceSourceType)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Choose source mode" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="create">Create new repo</SelectItem>
-                      <SelectItem value="clone">Clone repository</SelectItem>
-                      <SelectItem value="local">Add existing local repo</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {sourceType === "local" || sourceType === "clone" ? (
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm font-medium">{sourceLabel}</p>
-                  <Input
-                    value={sourceValue}
-                    onChange={(event) => setSourceValue(event.target.value)}
-                    placeholder={
-                      sourceType === "local"
-                        ? "/Users/lewi/Documents/ai/my-repo"
-                        : "https://github.com/acme/burns-web-app.git"
-                    }
-                  />
-                </div>
-              ) : null}
-
-              {sourceType === "clone" || sourceType === "create" ? (
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm font-medium">Target folder</p>
-                  <Input
-                    value={targetFolder}
-                    onChange={(event) => setTargetFolder(event.target.value)}
-                  />
-                </div>
-              ) : null}
-
-              <div className="flex flex-col gap-2">
-                <p className="text-sm font-medium">Workflow templates</p>
-                <Input defaultValue="issue-to-pr · pr-feedback · approval-gate" disabled />
-              </div>
-
-              {createWorkspace.error ? (
-                <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                  {createWorkspace.error.message}
-                </div>
-              ) : null}
-
-              <div className="flex items-center justify-end gap-2">
-                <Button variant="outline" disabled>
-                  Save draft
-                </Button>
-                <Button onClick={() => void handleCreateWorkspace()} disabled={createWorkspace.isPending}>
-                  {createWorkspace.isPending ? "Creating…" : "Create workspace"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="flex flex-col gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Summary</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2 text-sm text-muted-foreground">
-                <p>Workspace root: {settings?.workspaceRoot ?? "Loading…"}</p>
-                <p>Target folder: {targetFolder || name}</p>
-                <p>Agent default: {settings?.defaultAgent ?? "Loading…"}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Included workflows</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2 text-sm text-muted-foreground">
-                <p>• issue-to-pr</p>
-                <p>• pr-feedback</p>
-                <p>• approval-gate</p>
-              </CardContent>
-            </Card>
+          <div className="flex justify-end py-5">
+            <Button onClick={() => void handleCreateWorkspace()} disabled={isCreateDisabled}>
+              {createWorkspace.isPending ? "Confirming..." : "Confirm"}
+            </Button>
           </div>
         </div>
       </div>
