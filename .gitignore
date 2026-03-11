@@ -1,0 +1,12 @@
+node_modules
+bun.lock
+.DS_Store
+.env
+.env.local
+*.log
+dist
+coverage
+.sqlite
+.sqlite-shm
+.sqlite-wal
+.vscode

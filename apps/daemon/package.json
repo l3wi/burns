@@ -1,0 +1,19 @@
+{
+  "name": "@mr-burns/daemon",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/main.ts",
+    "start": "bun src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mr-burns/shared": "workspace:*",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "bun-types": "latest",
+    "typescript": "~5.9.3"
+  }
+}

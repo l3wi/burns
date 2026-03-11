@@ -1,0 +1,16 @@
+{
+  "name": "mr-burns",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "bun@1.2.19",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "cd apps/web && bun run dev",
+    "dev:daemon": "cd apps/daemon && bun run dev",
+    "build:web": "cd apps/web && bun run build",
+    "typecheck": "bunx tsc -p packages/shared/tsconfig.json --noEmit && bunx tsc -p packages/client/tsconfig.json --noEmit && cd apps/web && bun run typecheck && cd ../daemon && bun run typecheck"
+  }
+}
