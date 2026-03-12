@@ -6,6 +6,8 @@ This repository is a Bun monorepo with:
 
 - `apps/web`: React + Vite frontend
 - `apps/daemon`: local Bun HTTP daemon
+- `apps/desktop`: ElectroBun desktop shell package
+- `apps/cli`: CLI runtime and distribution path
 - `packages/shared`: shared Zod schemas and domain types
 - `packages/client`: typed API client used by the frontend
 - `packages/config`: placeholder package for shared tooling config
@@ -62,12 +64,38 @@ The web app defaults to `http://localhost:7332` for API calls. Override with:
 VITE_BURNS_API_URL=http://localhost:7332
 ```
 
+Desktop/CLI runtime contract can also inject:
+
+```ts
+window.__BURNS_RUNTIME_CONFIG__ = {
+  burnsApiUrl: "http://localhost:7332",
+  runtimeMode: "desktop" // or "cli"
+}
+```
+
 ## Workspace scripts
 
 - `bun run dev:web`: run Vite dev server
 - `bun run dev:daemon`: run daemon with watch mode
 - `bun run build:web`: build frontend
-- `bun run typecheck`: typecheck shared, client, web, and daemon packages
+- `bun run desktop:dev`: run ElectroBun desktop app
+- `bun run desktop:build:canary`: build desktop canary artifacts
+- `bun run desktop:build:stable`: build desktop stable artifacts
+- `bun run desktop:build:artifact`: build desktop archive into `dist/desktop` (channel/version via env)
+- `bun run cli:build:artifact`: build CLI archive into `dist/cli` (channel/version via env)
+- `bun run smoke:desktop-runtime`: desktop runtime smoke (daemon lifecycle + runtime config contract)
+- `bun run smoke:cli-runtime`: CLI runtime smoke (daemon + static web serving)
+- `bun run smoke:release`: run both smoke checks
+- `bun run cli:start`: run CLI daemon + web startup flow
+- `bun run cli:daemon`: run CLI daemon-only flow
+- `bun run cli:web`: serve built web assets from CLI
+- `bun run typecheck`: typecheck shared, client, web, daemon, cli, and desktop packages
+
+Desktop dev mode env options:
+
+- `BURNS_DESKTOP_DEV_SOURCE=views|vite` (`views` default)
+- `BURNS_DESKTOP_DEV_VITE_URL=http://localhost:5173`
+- `BURNS_DESKTOP_FORCE_API_URL=http://localhost:7332` (debug override)
 
 Additional app-level scripts:
 
@@ -106,6 +134,8 @@ Optional Smithers lifecycle env vars:
 - [Daemon API Reference](./docs/daemon-api-reference.md)
 - [Workspace + Runtime Handoff (Next Agent)](./docs/next-agent-workspace-gaps.md)
 - [Product Spec (target state)](./docs/mr-burns-spec.md)
+- [ElectroBun Release Plan](./docs/electrobun-release-plan.md)
+- [Docs Index](./docs/README.md)
 
 ## Notes
 

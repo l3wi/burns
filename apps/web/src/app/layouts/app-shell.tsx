@@ -1,6 +1,5 @@
 import { Outlet, useLocation } from "react-router-dom"
 
-import mrBurnsAvatar from "@/assets/mr-burns.png"
 import { SidebarNav } from "@/components/app-shell/sidebar-nav"
 import { WorkspaceSelector } from "@/components/app-shell/workspace-selector"
 import { Badge } from "@/components/ui/badge"
@@ -76,7 +75,11 @@ export function AppShell() {
         <div className="flex h-full flex-col gap-6 p-4">
           <div className="flex items-center gap-3 px-2 py-1">
             <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg border bg-background">
-              <img src={mrBurnsAvatar} alt="Mr. Burns" className="h-full w-full object-cover object-top" />
+              <img
+                src="/icons/app-icon-alt.png"
+                alt="Mr. Burns"
+                className="h-full w-full object-cover object-top"
+              />
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="font-semibold">Mr. Burns</span>

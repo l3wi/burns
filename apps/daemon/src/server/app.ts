@@ -4,7 +4,7 @@ import { getLogger, type BurnsLogger } from "@/logging/logger"
 import { handleAgentRoutes } from "@/server/routes/agent-routes"
 import { handleApprovalRoutes } from "@/server/routes/approval-routes"
 import { handleDiagnosticsRoutes } from "@/server/routes/diagnostics-routes"
-import { handleHealthRequest } from "@/server/routes/health-routes"
+import { DAEMON_HEALTH_PATH, handleHealthRequest } from "@/server/routes/health-routes"
 import { handleRunRoutes } from "@/server/routes/run-routes"
 import { handleSettingsRoutes } from "@/server/routes/settings-routes"
 import { handleSystemRoutes } from "@/server/routes/system-routes"
@@ -27,11 +27,19 @@ function withCorsHeaders(response: Response) {
   })
 }
 
-export function createApp(options: { logger?: BurnsLogger } = {}) {
+type CreateAppOptions = {
+  logger?: BurnsLogger
+  port?: number
+}
+
+export type DaemonApp = ReturnType<typeof createApp>
+
+export function createApp(options: CreateAppOptions = {}) {
   const logger = (options.logger ?? getLogger()).child({ component: "http.server" })
+  const port = options.port ?? 7332
 
   return {
-    port: 7332,
+    port,
     async fetch(request: Request) {
       const startedAt = performance.now()
       const url = new URL(request.url)
@@ -51,7 +59,7 @@ export function createApp(options: { logger?: BurnsLogger } = {}) {
           response = new Response(null, { status: 204 })
         } else {
           const routeResponse =
-            (pathname === "/api/health" ? handleHealthRequest() : null) ??
+            (pathname === DAEMON_HEALTH_PATH ? handleHealthRequest() : null) ??
             handleAgentRoutes(request, pathname) ??
             (await handleWorkspaceRoutes(request, pathname)) ??
             (await handleWorkflowRoutes(request, pathname)) ??
