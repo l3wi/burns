@@ -1,5 +1,5 @@
 import { CheckIcon } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 
 import {
@@ -37,7 +37,6 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -47,11 +46,12 @@ import {
 import { Input } from "@/components/ui/input"
 import { useAgentClis } from "@/features/agents/hooks/use-agent-clis"
 import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-workspace"
+import { WorkflowAuthoringConversationPanel } from "@/features/workflows/components/workflow-authoring-conversation-panel"
 import { useGenerateWorkflow } from "@/features/workflows/hooks/use-generate-workflow"
 
 export function NewWorkflowPage() {
   const navigate = useNavigate()
-  const { workspace } = useActiveWorkspace()
+  const { workspace, workspaceId } = useActiveWorkspace()
   const { data: agentClis = [], isLoading: isAgentListLoading } = useAgentClis()
   const generateWorkflow = useGenerateWorkflow(workspace?.id)
 
@@ -63,6 +63,7 @@ export function NewWorkflowPage() {
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false)
 
   const resolvedSelectedAgentId = selectedAgentId || agentClis[0]?.id || ""
+  const lastNavigatedWorkflowIdRef = useRef<string | null>(null)
 
   const selectedAgent = useMemo(
     () => agentClis.find((agent) => agent.id === resolvedSelectedAgentId) ?? null,
@@ -71,7 +72,11 @@ export function NewWorkflowPage() {
 
   const generatedWorkflow = generateWorkflow.data ?? null
 
-  const submitStatus = generateWorkflow.isPending ? "submitted" : "ready"
+  const submitStatus = generateWorkflow.isPending ? "streaming" : "ready"
+  const errorMessage =
+    generateWorkflow.error?.message === "[object Object]"
+      ? "Workflow generation failed with a malformed error payload. Check daemon logs for details."
+      : generateWorkflow.error?.message ?? null
 
   function handleAgentSubmit(message: PromptInputMessage) {
     if (!workspace || !resolvedSelectedAgentId) {
@@ -91,14 +96,30 @@ export function NewWorkflowPage() {
     })
   }
 
+  useEffect(() => {
+    if (!generatedWorkflow || generateWorkflow.isPending) {
+      return
+    }
+
+    if (lastNavigatedWorkflowIdRef.current === generatedWorkflow.id) {
+      return
+    }
+
+    lastNavigatedWorkflowIdRef.current = generatedWorkflow.id
+    if (!workspaceId) {
+      return
+    }
+    navigate(`/w/${workspaceId}/workflows/${generatedWorkflow.id}`, { replace: true })
+  }, [generatedWorkflow, generateWorkflow.isPending, navigate, workspaceId])
+
   return (
-    <div className="flex flex-col">
-      <div className="grid gap-4 p-6 xl:grid-cols-[28rem_1fr]">
-        <Card>
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-x-hidden xl:overflow-y-hidden">
+      <div className="grid w-full min-w-0 max-w-full gap-4 p-6 xl:h-full xl:min-h-0 xl:grid-cols-[28rem_1fr] xl:overflow-hidden">
+        <Card className="min-w-0 xl:flex xl:min-h-0 xl:flex-col">
           <CardHeader>
             <CardTitle>Workflow generator</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="workflow-name">Workflow name</FieldLabel>
@@ -169,38 +190,36 @@ export function NewWorkflowPage() {
                     </PromptInputTools>
                     <PromptInputSubmit
                       disabled={!name.trim() || !prompt.trim() || !resolvedSelectedAgentId || isAgentListLoading}
+                      onStop={generateWorkflow.cancel}
                       status={submitStatus}
                     />
                   </PromptInputFooter>
                 </PromptInput>
               </Field>
 
-              {generateWorkflow.error ? (
+              {errorMessage ? (
                 <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                  {generateWorkflow.error.message}
+                  {errorMessage}
                 </div>
               ) : null}
             </FieldGroup>
           </CardContent>
         </Card>
 
-        <div className="grid gap-4">
-          <Card>
+        <div className="grid min-w-0 gap-4 xl:h-full xl:min-h-0">
+          <Card className="min-w-0 xl:flex xl:min-h-0 xl:flex-col">
             <CardHeader>
               <CardTitle>Generated workflow</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4">
-              {generatedWorkflow ? (
-                 <div className="flex justify-end">
-                  <Button onClick={() => navigate(`/workflows/${generatedWorkflow.id}`)}>
-                    Open in editor
-                  </Button>
-                </div>
-              ) : null}
-
-              {generatedWorkflow ? (
+            <CardContent className="grid min-w-0 gap-4 xl:min-h-0 xl:flex-1">
+              {generateWorkflow.isPending ? (
+                <WorkflowAuthoringConversationPanel
+                  isStreaming={generateWorkflow.isPending}
+                  items={generateWorkflow.conversationItems}
+                />
+              ) : generatedWorkflow ? (
                 <CodeBlock
-                  className="max-h-[36rem]"
+                  className="h-full min-h-0"
                   code={generatedWorkflow.source}
                   language="tsx"
                   showLineNumbers
@@ -215,8 +234,8 @@ export function NewWorkflowPage() {
                   </CodeBlockHeader>
                 </CodeBlock>
               ) : (
-                <div className="flex min-h-[28rem] items-center justify-center rounded-xl border px-6 text-sm text-muted-foreground">
-                  Submit a workflow prompt to generate and preview a new workflow.
+                <div className="flex h-full min-h-0 items-center justify-center rounded-xl border px-6 text-sm text-muted-foreground">
+                  Submit a workflow prompt to generate. The preview updates when generation completes.
                 </div>
               )}
             </CardContent>

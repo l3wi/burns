@@ -37,16 +37,19 @@ export function getSupportedAgentCliById(agentId: string) {
   return supportedAgentClis.find((agent) => agent.id === agentId) ?? null
 }
 
-export function createCliAgent(agentId: string, systemPrompt?: string) {
+export function createCliAgent(
+  agentId: string,
+  options: { systemPrompt?: string; env?: Record<string, string | undefined> } = {}
+) {
   switch (agentId) {
     case "claude-code":
-      return new ClaudeCodeAgent({ systemPrompt })
+      return new ClaudeCodeAgent(options)
     case "codex":
-      return new CodexAgent({ systemPrompt })
+      return new CodexAgent(options)
     case "gemini":
-      return new GeminiAgent({ systemPrompt })
+      return new GeminiAgent(options)
     case "pi":
-      return new PiAgent({ systemPrompt })
+      return new PiAgent(options)
     default:
       throw new HttpError(400, `Unsupported agent CLI: ${agentId}`)
   }

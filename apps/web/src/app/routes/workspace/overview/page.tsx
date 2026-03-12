@@ -13,8 +13,6 @@ import { useApprovals } from "@/features/approvals/hooks/use-approvals"
 import { useRuns } from "@/features/runs/hooks/use-runs"
 import { useStartRun } from "@/features/runs/hooks/use-start-run"
 import { ActivityFeedCard } from "@/features/workspace/components/activity-feed-card"
-import { ServerHealthCard } from "@/features/workspace/components/server-health-card"
-import { useWorkspaceServerActions } from "@/features/workspace/hooks/use-workspace-server"
 import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-workspace"
 import { useWorkflows } from "@/features/workflows/hooks/use-workflows"
 
@@ -26,17 +24,10 @@ export function WorkspaceOverviewPage() {
   const { data: runs = [] } = useRuns(workspaceId)
   const { data: approvals = [] } = useApprovals(workspaceId)
   const startRun = useStartRun(workspaceId)
-  const serverActions = useWorkspaceServerActions(workspaceId)
   const pendingApprovals = approvals.filter((approval) => approval.status === "pending")
   const activeRuns = runs.filter(
     (run) => run.status === "running" || run.status === "waiting-approval"
   )
-  const isSelfManaged = workspace?.runtimeMode === "self-managed"
-  const serverActionDisabled =
-    isSelfManaged ||
-    serverActions.start.isPending ||
-    serverActions.restart.isPending ||
-    serverActions.stop.isPending
 
   return (
     <div className="flex flex-col">
@@ -78,14 +69,14 @@ export function WorkspaceOverviewPage() {
           </Card>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid gap-4">
           <Card>
             <CardHeader>
               <CardTitle>Quick actions</CardTitle>
               <CardDescription>Common workspace operations.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2 sm:grid-cols-2">
-              <Button variant="outline" onClick={() => navigate("/workflows")}>
+              <Button variant="outline" onClick={() => navigate(`/w/${workspaceId}/workflows`)}>
                 Open workflows
               </Button>
               <Button variant="outline" onClick={() => navigate(`/w/${workspaceId}/runs`)}>
@@ -129,49 +120,11 @@ export function WorkspaceOverviewPage() {
               >
                 {startRun.isPending ? "Starting run..." : "Start run from first workflow"}
               </Button>
-              <Button
-                variant="outline"
-                disabled={serverActionDisabled}
-                onClick={() => serverActions.restart.mutate()}
-              >
-                {serverActions.restart.isPending ? "Restarting server..." : "Restart server"}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={serverActionDisabled}
-                onClick={() => serverActions.start.mutate()}
-              >
-                {serverActions.start.isPending ? "Starting server..." : "Start server"}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={serverActionDisabled}
-                onClick={() => serverActions.stop.mutate()}
-              >
-                {serverActions.stop.isPending ? "Stopping server..." : "Stop server"}
-              </Button>
               {startRun.error ? (
                 <p className="text-sm text-destructive sm:col-span-2">{startRun.error.message}</p>
               ) : null}
-              {isSelfManaged ? (
-                <p className="text-xs text-muted-foreground sm:col-span-2">
-                  Server controls are disabled for self-managed workspaces.
-                </p>
-              ) : null}
-              {serverActions.start.error ?? serverActions.restart.error ?? serverActions.stop.error ? (
-                <p className="text-sm text-destructive sm:col-span-2">
-                  {(serverActions.start.error ?? serverActions.restart.error ?? serverActions.stop.error)?.message}
-                </p>
-              ) : null}
             </CardContent>
           </Card>
-
-          <ServerHealthCard
-            workspace={workspace}
-            workspaceId={workspaceId}
-            title="Workspace health"
-            showControls
-          />
         </div>
 
         <ActivityFeedCard

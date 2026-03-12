@@ -9,6 +9,7 @@ export const workspaceHealthStatusSchema = z.enum([
 
 export const workspaceSourceTypeSchema = z.enum(["local", "clone", "create"])
 export const workspaceRuntimeModeSchema = z.enum(["burns-managed", "self-managed"])
+export const workspaceDeleteModeSchema = z.enum(["unlink", "delete"])
 export const workspaceServerProcessStateSchema = z.enum([
   "starting",
   "healthy",
@@ -42,6 +43,17 @@ export const workspaceServerStatusSchema = z.object({
   crashCount: z.number().int().nonnegative(),
   port: z.number().int().positive().nullable(),
   baseUrl: z.string().nullable(),
+})
+
+export const deleteWorkspaceInputSchema = z.object({
+  mode: workspaceDeleteModeSchema,
+})
+
+export const deleteWorkspaceResultSchema = z.object({
+  workspaceId: z.string(),
+  mode: workspaceDeleteModeSchema,
+  path: z.string(),
+  filesDeleted: z.boolean(),
 })
 
 export const createWorkspaceInputSchema = z.discriminatedUnion("sourceType", [
@@ -79,6 +91,9 @@ export type Workspace = z.infer<typeof workspaceSchema>
 export type WorkspaceHealthStatus = z.infer<typeof workspaceHealthStatusSchema>
 export type WorkspaceSourceType = z.infer<typeof workspaceSourceTypeSchema>
 export type WorkspaceRuntimeMode = z.infer<typeof workspaceRuntimeModeSchema>
+export type WorkspaceDeleteMode = z.infer<typeof workspaceDeleteModeSchema>
 export type WorkspaceServerProcessState = z.infer<typeof workspaceServerProcessStateSchema>
 export type WorkspaceServerStatus = z.infer<typeof workspaceServerStatusSchema>
 export type CreateWorkspaceInput = z.infer<typeof createWorkspaceInputSchema>
+export type DeleteWorkspaceInput = z.infer<typeof deleteWorkspaceInputSchema>
+export type DeleteWorkspaceResult = z.infer<typeof deleteWorkspaceResultSchema>

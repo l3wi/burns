@@ -32,7 +32,7 @@ export function WorkflowEditorPane({
   isDeleting?: boolean
 }) {
   return (
-    <Card className="min-h-[32rem] gap-4">
+    <Card className="gap-4 xl:h-full xl:min-h-0 xl:flex xl:flex-col">
       <CardHeader>
         <div className="flex flex-col gap-1">
           <CardTitle>{workflow ? workflow.name : "Select a workflow"}</CardTitle>
@@ -54,9 +54,9 @@ export function WorkflowEditorPane({
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-3">
+      <CardContent className="flex flex-1 flex-col gap-3 xl:min-h-0">
         {workflow ? (
-          <CodeBlock className="max-h-[36rem]" code={workflow.source} language="tsx" showLineNumbers>
+          <CodeBlock className="h-full min-h-0" code={workflow.source} language="tsx" showLineNumbers>
             <CodeBlockHeader>
               <CodeBlockTitle>
                 <CodeBlockFilename>workflow.tsx</CodeBlockFilename>
@@ -67,7 +67,7 @@ export function WorkflowEditorPane({
             </CodeBlockHeader>
           </CodeBlock>
         ) : (
-          <div className="flex min-h-[24rem] items-center justify-center rounded-xl border px-6 text-sm text-muted-foreground">
+          <div className="flex h-full min-h-0 items-center justify-center rounded-xl border px-6 text-sm text-muted-foreground">
             Select a workflow to preview highlighted source.
           </div>
         )}

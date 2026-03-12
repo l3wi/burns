@@ -8,7 +8,7 @@ export type CliCommandSpec = {
   outputFile?: string
   cleanup?: () => Promise<void>
   stdoutBannerPatterns?: RegExp[]
-  env?: Record<string, string>
+  env?: Record<string, string | undefined>
 }
 
 export type BaseCliAgentOptions = {
@@ -17,13 +17,74 @@ export type BaseCliAgentOptions = {
   yolo?: boolean
   extraArgs?: string[]
   timeoutMs?: number
-  env?: Record<string, string>
+  env?: Record<string, string | undefined>
 }
 
-type RunCommandResult = {
+export type RunCommandResult = {
   stdout: string
   stderr: string
   exitCode: number | null
+}
+
+type AgentOutputChunk = {
+  stream: "stdout" | "stderr"
+  chunk: string
+}
+
+export type AgentCliActionKind =
+  | "turn"
+  | "command"
+  | "tool"
+  | "file_change"
+  | "web_search"
+  | "todo_list"
+  | "reasoning"
+  | "warning"
+  | "note"
+
+export type AgentCliActionPhase = "started" | "updated" | "completed"
+export type AgentCliEventLevel = "debug" | "info" | "warning" | "error"
+
+export type AgentCliStartedEvent = {
+  type: "started"
+  engine: string
+  title: string
+  resume?: string
+  detail?: Record<string, unknown>
+}
+
+export type AgentCliActionEvent = {
+  type: "action"
+  engine: string
+  phase: AgentCliActionPhase
+  entryType?: "thought" | "message"
+  action: {
+    id: string
+    kind: AgentCliActionKind
+    title: string
+    detail?: Record<string, unknown>
+  }
+  message?: string
+  ok?: boolean
+  level?: AgentCliEventLevel
+}
+
+export type AgentCliCompletedEvent = {
+  type: "completed"
+  engine: string
+  ok: boolean
+  answer?: string
+  error?: string
+  resume?: string
+  usage?: Record<string, unknown>
+}
+
+export type AgentCliEvent = AgentCliStartedEvent | AgentCliActionEvent | AgentCliCompletedEvent
+
+export type CliOutputInterpreter = {
+  onStdoutLine?: (line: string) => AgentCliEvent[] | AgentCliEvent | null | undefined
+  onStderrLine?: (line: string) => AgentCliEvent[] | AgentCliEvent | null | undefined
+  onExit?: (result: RunCommandResult) => AgentCliEvent[] | AgentCliEvent | null | undefined
 }
 
 export function pushFlag(
@@ -54,7 +115,13 @@ export function pushList(args: string[], flag: string, values?: string[]) {
 async function runCommand(
   command: string,
   args: string[],
-  options: { cwd: string; input?: string; timeoutMs?: number; env?: Record<string, string> }
+  options: {
+    cwd: string
+    input?: string
+    timeoutMs?: number
+    env?: Record<string, string | undefined>
+    onOutput?: (output: AgentOutputChunk) => void
+  }
 ): Promise<RunCommandResult> {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -90,11 +157,15 @@ async function runCommand(
     }
 
     child.stdout?.on("data", (chunk) => {
-      stdout += chunk.toString("utf8")
+      const decodedChunk = chunk.toString("utf8")
+      stdout += decodedChunk
+      options.onOutput?.({ stream: "stdout", chunk: decodedChunk })
     })
 
     child.stderr?.on("data", (chunk) => {
-      stderr += chunk.toString("utf8")
+      const decodedChunk = chunk.toString("utf8")
+      stderr += decodedChunk
+      options.onOutput?.({ stream: "stderr", chunk: decodedChunk })
     })
 
     child.on("error", (error) => {
@@ -125,7 +196,7 @@ export abstract class BaseCliAgent {
   protected readonly yolo: boolean
   protected readonly extraArgs?: string[]
   protected readonly timeoutMs?: number
-  protected readonly env?: Record<string, string>
+  protected readonly env?: Record<string, string | undefined>
 
   constructor(options: BaseCliAgentOptions) {
     this.model = options.model
@@ -136,8 +207,58 @@ export abstract class BaseCliAgent {
     this.env = options.env
   }
 
-  async generate(params: { prompt: string; cwd: string }) {
+  async generate(params: {
+    prompt: string
+    cwd: string
+    onOutput?: (output: AgentOutputChunk) => void
+    onEvent?: (event: AgentCliEvent) => void
+  }) {
     const commandSpec = await this.buildCommand(params)
+    const interpreter = this.createOutputInterpreter()
+    let stdoutBuffer = ""
+    let stderrBuffer = ""
+
+    const emitEvents = (eventPayload: AgentCliEvent[] | AgentCliEvent | null | undefined) => {
+      if (!eventPayload) {
+        return
+      }
+
+      if (Array.isArray(eventPayload)) {
+        for (const event of eventPayload) {
+          params.onEvent?.(event)
+        }
+        return
+      }
+
+      params.onEvent?.(eventPayload)
+    }
+
+    const flushBufferedLines = (stream: "stdout" | "stderr", includePartial: boolean) => {
+      let buffer = stream === "stdout" ? stdoutBuffer : stderrBuffer
+      const lines = buffer.split("\n")
+      if (!includePartial) {
+        buffer = lines.pop() ?? ""
+      } else {
+        buffer = ""
+      }
+
+      for (const line of lines) {
+        if (!line) {
+          continue
+        }
+        emitEvents(
+          stream === "stdout"
+            ? interpreter?.onStdoutLine?.(line)
+            : interpreter?.onStderrLine?.(line)
+        )
+      }
+
+      if (stream === "stdout") {
+        stdoutBuffer = includePartial ? "" : buffer
+      } else {
+        stderrBuffer = includePartial ? "" : buffer
+      }
+    }
 
     try {
       const result = await runCommand(commandSpec.command, commandSpec.args, {
@@ -148,7 +269,27 @@ export abstract class BaseCliAgent {
           ...(this.env ?? {}),
           ...(commandSpec.env ?? {}),
         },
+        onOutput: (output) => {
+          params.onOutput?.(output)
+
+          if (!interpreter) {
+            return
+          }
+
+          if (output.stream === "stdout") {
+            stdoutBuffer += output.chunk
+            flushBufferedLines("stdout", false)
+            return
+          }
+
+          stderrBuffer += output.chunk
+          flushBufferedLines("stderr", false)
+        },
       })
+
+      flushBufferedLines("stdout", true)
+      flushBufferedLines("stderr", true)
+      emitEvents(interpreter?.onExit?.(result))
 
       const stdout = commandSpec.outputFile
         ? await fs.readFile(commandSpec.outputFile, "utf8").catch(() => result.stdout)
@@ -173,4 +314,8 @@ export abstract class BaseCliAgent {
     prompt: string
     cwd: string
   }): Promise<CliCommandSpec>
+
+  protected createOutputInterpreter(): CliOutputInterpreter | null {
+    return null
+  }
 }

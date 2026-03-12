@@ -6,13 +6,14 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import { insertWorkspaceRow } from "@/db/repositories/workspace-repository"
 import { createApp } from "@/server/app"
+import { resolveTestWorkspacePath } from "@/testing/test-workspace-path"
 
 const originalFetch = globalThis.fetch
 const workspacePathsToDelete = new Set<string>()
 
 function seedWorkspace() {
   const workspaceId = `test-workspace-${randomUUID()}`
-  const workspacePath = path.join("/tmp", workspaceId)
+  const workspacePath = resolveTestWorkspacePath(workspaceId)
   const now = new Date().toISOString()
 
   insertWorkspaceRow({
@@ -31,9 +32,9 @@ function seedWorkspace() {
 }
 
 function writeWorkflowFile(workspaceId: string, workflowId: string, extension: "ts" | "tsx") {
+  const workspacePath = resolveTestWorkspacePath(workspaceId)
   const workflowPath = path.join(
-    "/tmp",
-    workspaceId,
+    workspacePath,
     ".mr-burns",
     "workflows",
     workflowId
@@ -43,9 +44,9 @@ function writeWorkflowFile(workspaceId: string, workflowId: string, extension: "
 }
 
 function writeLegacyWorkflowTemplate(workspaceId: string, workflowId: string) {
+  const workspacePath = resolveTestWorkspacePath(workspaceId)
   const workflowPath = path.join(
-    "/tmp",
-    workspaceId,
+    workspacePath,
     ".mr-burns",
     "workflows",
     workflowId
@@ -596,8 +597,7 @@ describe("run routes", () => {
 
     const repairedSource = readFileSync(
       path.join(
-        "/tmp",
-        workspaceId,
+        resolveTestWorkspacePath(workspaceId),
         ".mr-burns",
         "workflows",
         "issue-to-pr",

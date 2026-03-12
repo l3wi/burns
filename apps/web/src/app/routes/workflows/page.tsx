@@ -18,10 +18,11 @@ import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-works
 export function WorkflowsPage() {
   const navigate = useNavigate()
   const { workflowId: selectedWorkflowId } = useParams()
-  const { workspace } = useActiveWorkspace()
+  const { workspace, workspaceId } = useActiveWorkspace()
   const { data: workflows = [], isLoading } = useWorkflows(workspace?.id)
   const { data: workflowDocument } = useWorkflow(workspace?.id, selectedWorkflowId)
   const deleteWorkflow = useDeleteWorkflow(workspace?.id)
+  const workflowsBasePath = workspaceId ? `/w/${workspaceId}/workflows` : "/"
 
   useEffect(() => {
     if (!selectedWorkflowId || isLoading) {
@@ -29,19 +30,19 @@ export function WorkflowsPage() {
     }
 
     if (workflows.every((workflow) => workflow.id !== selectedWorkflowId)) {
-      navigate("/workflows", { replace: true })
+      navigate(workflowsBasePath, { replace: true })
     }
-  }, [isLoading, navigate, selectedWorkflowId, workflows])
+  }, [isLoading, navigate, selectedWorkflowId, workflows, workflowsBasePath])
 
   return (
-    <div className="flex flex-col">
-      <div className="grid gap-4 p-6 xl:grid-cols-[20rem_1fr]">
-        <Card className="h-full">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-x-hidden xl:overflow-y-hidden">
+      <div className="grid w-full min-w-0 max-w-full gap-4 p-6 xl:h-full xl:min-h-0 xl:grid-cols-[20rem_1fr] xl:overflow-hidden">
+        <Card className="h-full min-w-0 xl:flex xl:min-h-0 xl:flex-col">
           <CardHeader>
             <CardTitle>Workspace workflows</CardTitle>
             <CardDescription>Source files under .mr-burns/workflows.</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+          <CardContent className="flex flex-col gap-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
             {isLoading ? (
               <p className="text-sm text-muted-foreground">Loading workflows…</p>
             ) : workflows.length === 0 ? (
@@ -51,7 +52,7 @@ export function WorkflowsPage() {
                 <button
                   key={workflow.id}
                   type="button"
-                  onClick={() => navigate(`/workflows/${workflow.id}`)}
+                  onClick={() => navigate(`${workflowsBasePath}/${workflow.id}`)}
                   className="flex items-center justify-between rounded-xl border px-3 py-3 text-left transition-colors hover:bg-muted"
                 >
                   <div className="flex flex-col gap-1">
@@ -67,17 +68,17 @@ export function WorkflowsPage() {
           </CardContent>
         </Card>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4 xl:min-h-0">
           <WorkflowEditorPane
             workflow={workflowDocument ?? null}
             isDeleting={deleteWorkflow.isPending}
-            onCreateNew={() => navigate("/workflows/new")}
+            onCreateNew={() => navigate(`${workflowsBasePath}/new`)}
             onEditWithAi={() => {
               if (!selectedWorkflowId) {
                 return
               }
 
-              navigate(`/workflows/${selectedWorkflowId}/edit`)
+              navigate(`${workflowsBasePath}/${selectedWorkflowId}/edit`)
             }}
             onDelete={() => {
               if (!selectedWorkflowId) {
@@ -98,7 +99,7 @@ export function WorkflowsPage() {
                   )
                   const nextSelectedId = remainingWorkflows[0]?.id
 
-                  navigate(nextSelectedId ? `/workflows/${nextSelectedId}` : "/workflows")
+                  navigate(nextSelectedId ? `${workflowsBasePath}/${nextSelectedId}` : workflowsBasePath)
                 },
               })
             }}

@@ -719,6 +719,21 @@ export async function stopWorkspaceSmithersServer(workspaceId: string) {
   return toManagedRecordStatus(record)
 }
 
+export function dropWorkspaceSmithersRecord(workspaceId: string) {
+  const record = instances.get(workspaceId)
+  if (!record) {
+    return
+  }
+
+  if (record.restartTimer) {
+    clearTimeout(record.restartTimer)
+    record.restartTimer = undefined
+  }
+
+  record.process = null
+  instances.delete(workspaceId)
+}
+
 export async function warmWorkspaceSmithersInstances(workspaces: Workspace[]) {
   if (!managedModeEnabled || workspaces.length === 0) {
     return

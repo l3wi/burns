@@ -1,16 +1,24 @@
-import { existsSync, mkdirSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync } from "node:fs"
 import path from "node:path"
 
-import type { CreateWorkspaceInput, Workspace } from "@mr-burns/shared"
+import type {
+  CreateWorkspaceInput,
+  DeleteWorkspaceInput,
+  DeleteWorkspaceResult,
+  Workspace,
+} from "@mr-burns/shared"
 
 import { DEFAULT_AGENT } from "@/config/app-config"
 import { DEFAULT_WORKSPACES_ROOT } from "@/config/paths"
 import {
   countWorkspaces,
+  deleteWorkspaceRowById,
   findWorkspaceRowById,
   insertWorkspaceRow,
   listWorkspaceRows,
 } from "@/db/repositories/workspace-repository"
+import { deleteApprovalRowsByWorkspaceId } from "@/db/repositories/approval-repository"
+import { deleteRunEventRowsByWorkspaceId } from "@/db/repositories/run-event-repository"
 import {
   assertDirectoryUsable,
   cloneRepository,
@@ -19,7 +27,11 @@ import {
   initRepository,
   isGitRepository,
 } from "@/services/git-service"
-import { startWorkspaceSmithersInBackground } from "@/services/smithers-instance-service"
+import {
+  dropWorkspaceSmithersRecord,
+  startWorkspaceSmithersInBackground,
+  stopWorkspaceSmithersServer,
+} from "@/services/smithers-instance-service"
 import { ensureDefaultWorkflowTemplates } from "@/services/workflow-service"
 import { getLogger } from "@/logging/logger"
 import { HttpError } from "@/utils/http-error"
@@ -77,6 +89,15 @@ function resolveWorkspacePath(input: CreateWorkspaceInput, workspaceId: string) 
   }
 
   return resolveRelativeTargetFolder(input.targetFolder, workspaceId)
+}
+
+function assertWorkspacePathCanBeDeleted(workspacePath: string) {
+  const resolvedWorkspacePath = path.resolve(workspacePath)
+  const rootPath = path.parse(resolvedWorkspacePath).root
+
+  if (resolvedWorkspacePath === rootPath) {
+    throw new HttpError(400, "Refusing to delete a filesystem root path")
+  }
 }
 
 function assertWorkspaceDoesNotExist(id: string, workspacePath: string) {
@@ -180,4 +201,33 @@ export function createWorkspace(input: CreateWorkspaceInput) {
   startWorkspaceSmithersInBackground(persistedWorkspace)
 
   return persistedWorkspace
+}
+
+export async function deleteWorkspace(
+  workspaceId: string,
+  input: DeleteWorkspaceInput
+): Promise<DeleteWorkspaceResult> {
+  const workspace = getWorkspace(workspaceId)
+  if (!workspace) {
+    throw new HttpError(404, `Workspace not found: ${workspaceId}`)
+  }
+
+  await stopWorkspaceSmithersServer(workspaceId)
+  dropWorkspaceSmithersRecord(workspaceId)
+
+  if (input.mode === "delete") {
+    assertWorkspacePathCanBeDeleted(workspace.path)
+    rmSync(workspace.path, { recursive: true, force: true })
+  }
+
+  deleteApprovalRowsByWorkspaceId(workspaceId)
+  deleteRunEventRowsByWorkspaceId(workspaceId)
+  deleteWorkspaceRowById(workspaceId)
+
+  return {
+    workspaceId,
+    mode: input.mode,
+    path: workspace.path,
+    filesDeleted: input.mode === "delete",
+  }
 }

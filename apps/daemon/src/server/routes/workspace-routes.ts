@@ -1,4 +1,4 @@
-import { createWorkspaceInputSchema } from "@mr-burns/shared"
+import { createWorkspaceInputSchema, deleteWorkspaceInputSchema } from "@mr-burns/shared"
 
 import {
   getWorkspaceSmithersServerStatus,
@@ -7,7 +7,12 @@ import {
   stopWorkspaceSmithersServer,
 } from "@/services/smithers-instance-service"
 import { getWorkspaceHealth } from "@/services/supervisor-service"
-import { createWorkspace, getWorkspace, listWorkspaces } from "@/services/workspace-service"
+import {
+  createWorkspace,
+  deleteWorkspace,
+  getWorkspace,
+  listWorkspaces,
+} from "@/services/workspace-service"
 import { HttpError, toErrorResponse } from "@/utils/http-error"
 
 export async function handleWorkspaceRoutes(request: Request, pathname: string) {
@@ -53,6 +58,11 @@ export async function handleWorkspaceRoutes(request: Request, pathname: string) 
     }
 
     const workspaceMatch = pathname.match(/^\/api\/workspaces\/([^/]+)$/)
+    if (workspaceMatch && request.method === "DELETE") {
+      const input = deleteWorkspaceInputSchema.parse(await request.json())
+      return Response.json(await deleteWorkspace(workspaceMatch[1], input))
+    }
+
     if (workspaceMatch && request.method === "GET") {
       const workspace = getWorkspace(workspaceMatch[1])
 

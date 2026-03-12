@@ -134,3 +134,16 @@ export function countApprovalRows() {
   const row = db.query<{ count: number }, []>(`SELECT COUNT(*) AS count FROM approvals`).get()
   return row?.count ?? 0
 }
+
+export function deleteApprovalRowsByWorkspaceId(workspaceId: string) {
+  const result = db
+    .query(
+      `
+        DELETE FROM approvals
+        WHERE workspace_id = ?1
+      `
+    )
+    .run(workspaceId)
+
+  return result.changes
+}

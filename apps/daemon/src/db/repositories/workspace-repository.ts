@@ -128,3 +128,16 @@ export function countWorkspaces() {
   const row = db.query<{ count: number }, []>(`SELECT COUNT(*) as count FROM workspaces`).get()
   return row?.count ?? 0
 }
+
+export function deleteWorkspaceRowById(workspaceId: string) {
+  const result = db
+    .query(
+      `
+        DELETE FROM workspaces
+        WHERE id = ?1
+      `
+    )
+    .run(workspaceId)
+
+  return result.changes
+}

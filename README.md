@@ -74,6 +74,20 @@ Additional app-level scripts:
 - `apps/web`: `bun run lint`, `bun run preview`
 - `apps/daemon`: `bun run start`, `bun run typecheck`, `bun run test`
 
+## Desktop + CLI release scaffolding
+
+Desktop and CLI packaging commands are still in progress. Release automation is script-driven so command wiring can land independently.
+
+- Run an optional release build step:
+  - `bash scripts/release/run-build-step.sh --label "desktop build" --command "<desktop-build-command>"`
+  - `bash scripts/release/run-build-step.sh --label "cli build" --command "<cli-build-command>"`
+- Generate contract-compliant artifact names:
+  - `bash scripts/release/artifact-name.sh --channel canary --component desktop --version 0.0.0-canary.1+abc12345 --target-os darwin --target-arch arm64 --extension zip`
+- Collect and rename artifacts:
+  - `bash scripts/release/collect-artifacts.sh --channel canary --version 0.0.0-canary.1+abc12345 --target-os darwin --target-arch arm64 --desktop-pattern "dist/desktop/*" --cli-pattern "dist/cli/*" --output-dir release-artifacts`
+- Draft release notes:
+  - `bash scripts/release/create-release-notes.sh --channel canary --version 0.0.0-canary.1+abc12345 --commit <sha>`
+
 ## Runtime data locations
 
 The daemon stores local state in `apps/daemon/.data`:
@@ -102,8 +116,13 @@ Optional Smithers lifecycle env vars:
 
 ## Documentation index
 
+- [Documentation Index](./docs/README.md)
 - [Codebase Layout](./docs/codebase-layout.md)
 - [Daemon API Reference](./docs/daemon-api-reference.md)
+- [ElectroBun Release Plan](./docs/electrobun-release-plan.md)
+- [Release Automation Reference](./docs/release-automation.md)
+- [Release Runbook (Canary + Stable)](./docs/release-runbook.md)
+- [Release Checklist](./docs/release-checklist.md)
 - [Workspace + Runtime Handoff (Next Agent)](./docs/next-agent-workspace-gaps.md)
 - [Product Spec (target state)](./docs/mr-burns-spec.md)
 

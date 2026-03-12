@@ -7,7 +7,9 @@
     "dev": "bun --watch src/main.ts",
     "start": "bun src/main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun run src/testing/run-tests-isolated.ts",
+    "test:raw": "bun test",
+    "test:cleanup-workspaces": "bun run src/testing/cleanup-test-workspaces.ts"
   },
   "dependencies": {
     "@mr-burns/shared": "workspace:*",

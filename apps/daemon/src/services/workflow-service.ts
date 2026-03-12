@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
-import type { Workflow, WorkflowDocument } from "@mr-burns/shared"
+import type { Workflow, WorkflowAuthoringStage, WorkflowDocument } from "@mr-burns/shared"
 
+import type { AgentCliEvent } from "@/agents/BaseCliAgent"
 import { defaultWorkflowTemplates } from "@/domain/workflows/templates"
 import { runWorkflowGenerationAgent } from "@/services/agent-cli-service"
 import { getWorkspace } from "@/services/workspace-service"
@@ -37,6 +38,19 @@ export default smithers((ctx) => (
 const defaultTemplateById = new Map<string, string>(
   defaultWorkflowTemplates.map((template) => [template.id, template.source])
 )
+
+const MAX_WORKFLOW_AUTHORING_ATTEMPTS = 2
+
+type WorkflowAuthoringProgressEvent = {
+  stage: WorkflowAuthoringStage
+  message: string
+  attempt?: number
+  totalAttempts?: number
+}
+
+type WorkflowAuthoringProgressHandler = (event: WorkflowAuthoringProgressEvent) => void
+type WorkflowAuthoringOutputHandler = (event: { stream: "stdout" | "stderr"; chunk: string }) => void
+type WorkflowAuthoringAgentEventHandler = (event: AgentCliEvent) => void
 
 function getWorkflowRoot(workspaceId: string) {
   const workspace = getWorkspace(workspaceId)
@@ -181,6 +195,63 @@ function buildWorkflowEditPrompt(params: {
   ].join("\n\n")
 }
 
+function buildWorkflowRepairPrompt(params: {
+  workflowName: string
+  workflowId: string
+  userPrompt: string
+  workspacePath: string
+  relativeFilePath: string
+  validationError: string
+}) {
+  return [
+    "You are repairing a Smithers workflow file after validation failed.",
+    "Read the current workflow file and overwrite that same file on disk with a corrected version.",
+    "Do not create a second workflow file and do not rename the workflow folder.",
+    "Do not return the full file in chat.",
+    "After fixing the file on disk, reply with a short success confirmation only.",
+    `Workflow display name: ${params.workflowName}`,
+    `Workflow folder id: ${params.workflowId}`,
+    `Target relative file: ${params.relativeFilePath}`,
+    `Workspace path: ${params.workspacePath}`,
+    "The file must import createSmithers from smithers-orchestrator and z from zod.",
+    "The file must define smithers via createSmithers(...) and default export smithers((ctx) => (...)).",
+    "Every task output must use output={outputs.<schemaKey>}.",
+    "Validation error to fix:",
+    params.validationError,
+    "Original user request (preserve intent):",
+    params.userPrompt,
+    "Scaffold reference:",
+    `\`\`\`tsx\n${workflowPromptScaffold}\n\`\`\``,
+  ].join("\n\n")
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof HttpError) {
+    return error.message
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  return "Workflow authoring failed with an unknown error."
+}
+
+function isNonFatalCodexWarning(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase()
+
+  if (!message.includes("mcp") && !message.includes("network")) {
+    return false
+  }
+
+  return (
+    message.includes("transport channel closed") ||
+    message.includes("connection refused") ||
+    message.includes("failed to start") ||
+    message.includes("network error")
+  )
+}
+
 const workflowAuthorSystemPrompt =
   "You author Smithers workflow files. Write the requested file to disk and then return a short success confirmation."
 
@@ -312,6 +383,97 @@ function finalizeWorkflowFile(workspaceId: string, workflowId: string, filePath:
   return getWorkflow(workspaceId, workflowId)
 }
 
+async function runWorkflowAuthoringWithRetries(params: {
+  workspaceId: string
+  workflowId: string
+  workflowName: string
+  workspacePath: string
+  relativeFilePath: string
+  filePath: string
+  agentId: string
+  initialPrompt: string
+  userPrompt: string
+  onProgress?: WorkflowAuthoringProgressHandler
+  onAgentOutput?: WorkflowAuthoringOutputHandler
+  onAgentEvent?: WorkflowAuthoringAgentEventHandler
+}) {
+  let promptToRun = params.initialPrompt
+
+  for (let attempt = 1; attempt <= MAX_WORKFLOW_AUTHORING_ATTEMPTS; attempt += 1) {
+    params.onProgress?.({
+      stage: "running-agent",
+      message: `Running ${params.agentId} authoring attempt ${attempt}/${MAX_WORKFLOW_AUTHORING_ATTEMPTS}.`,
+      attempt,
+      totalAttempts: MAX_WORKFLOW_AUTHORING_ATTEMPTS,
+    })
+
+    let commandError: unknown = null
+    try {
+      await runWorkflowGenerationAgent({
+        agentId: params.agentId,
+        prompt: promptToRun,
+        cwd: params.workspacePath,
+        systemPrompt: workflowAuthorSystemPrompt,
+        onOutput: params.onAgentOutput,
+        onEvent: params.onAgentEvent,
+      })
+    } catch (error) {
+      commandError = error
+      if (!(params.agentId === "codex" && isNonFatalCodexWarning(error))) {
+        throw error
+      }
+
+      params.onProgress?.({
+        stage: "validating",
+        message: "Codex reported non-fatal MCP/network warnings. Continuing with validation.",
+        attempt,
+        totalAttempts: MAX_WORKFLOW_AUTHORING_ATTEMPTS,
+      })
+    }
+
+    params.onProgress?.({
+      stage: "validating",
+      message: `Validating workflow source after attempt ${attempt}.`,
+      attempt,
+      totalAttempts: MAX_WORKFLOW_AUTHORING_ATTEMPTS,
+    })
+
+    try {
+      return finalizeWorkflowFile(params.workspaceId, params.workflowId, params.filePath)
+    } catch (error) {
+      const validationError =
+        commandError && params.agentId === "codex" && isNonFatalCodexWarning(commandError)
+          ? `${getErrorMessage(commandError)}; ${getErrorMessage(error)}`
+          : getErrorMessage(error)
+
+      if (attempt >= MAX_WORKFLOW_AUTHORING_ATTEMPTS) {
+        if (commandError && params.agentId === "codex" && isNonFatalCodexWarning(commandError)) {
+          throw new HttpError(500, validationError)
+        }
+        throw error
+      }
+
+      params.onProgress?.({
+        stage: "retrying",
+        message: `Validation failed on attempt ${attempt}: ${validationError}`,
+        attempt,
+        totalAttempts: MAX_WORKFLOW_AUTHORING_ATTEMPTS,
+      })
+
+      promptToRun = buildWorkflowRepairPrompt({
+        workflowName: params.workflowName,
+        workflowId: params.workflowId,
+        userPrompt: params.userPrompt,
+        workspacePath: params.workspacePath,
+        relativeFilePath: params.relativeFilePath,
+        validationError,
+      })
+    }
+  }
+
+  throw new HttpError(500, "Workflow authoring exhausted all retries")
+}
+
 export function repairLegacyDefaultWorkflowTemplate(
   workspaceId: string,
   workflowId: string
@@ -343,6 +505,9 @@ export async function generateWorkflowFromPrompt(params: {
   name: string
   agentId: string
   prompt: string
+  onProgress?: WorkflowAuthoringProgressHandler
+  onAgentOutput?: WorkflowAuthoringOutputHandler
+  onAgentEvent?: WorkflowAuthoringAgentEventHandler
 }) {
   const workspace = getWorkspace(params.workspaceId)
 
@@ -358,8 +523,15 @@ export async function generateWorkflowFromPrompt(params: {
   const workflowRoot = getWorkflowRoot(params.workspaceId)
   const workflowDir = path.join(workflowRoot, workflowId)
   const filePath = path.join(workflowDir, "workflow.tsx")
+  const relativeFilePath = path.join(".mr-burns", "workflows", workflowId, "workflow.tsx")
 
   mkdirSync(workflowDir, { recursive: true })
+
+  params.onProgress?.({
+    stage: "preparing",
+    message: `Preparing generation for workflow "${params.name}" (${workflowId}).`,
+    totalAttempts: MAX_WORKFLOW_AUTHORING_ATTEMPTS,
+  })
 
   const generationPrompt = buildWorkflowGenerationPrompt({
     workflowName: params.name,
@@ -368,14 +540,27 @@ export async function generateWorkflowFromPrompt(params: {
     workspacePath: workspace.path,
   })
 
-  await runWorkflowGenerationAgent({
+  const authoredWorkflow = await runWorkflowAuthoringWithRetries({
+    workspaceId: params.workspaceId,
+    workflowId,
+    workflowName: params.name,
+    workspacePath: workspace.path,
+    relativeFilePath,
+    filePath,
     agentId: params.agentId,
-    prompt: generationPrompt,
-    cwd: workspace.path,
-    systemPrompt: workflowAuthorSystemPrompt,
+    initialPrompt: generationPrompt,
+    userPrompt: params.prompt,
+    onProgress: params.onProgress,
+    onAgentOutput: params.onAgentOutput,
+    onAgentEvent: params.onAgentEvent,
   })
 
-  return finalizeWorkflowFile(params.workspaceId, workflowId, filePath)
+  params.onProgress?.({
+    stage: "completed",
+    message: `Workflow "${workflowId}" generated successfully.`,
+  })
+
+  return authoredWorkflow
 }
 
 export async function editWorkflowFromPrompt(params: {
@@ -383,6 +568,9 @@ export async function editWorkflowFromPrompt(params: {
   workflowId: string
   agentId: string
   prompt: string
+  onProgress?: WorkflowAuthoringProgressHandler
+  onAgentOutput?: WorkflowAuthoringOutputHandler
+  onAgentEvent?: WorkflowAuthoringAgentEventHandler
 }) {
   const workspace = getWorkspace(params.workspaceId)
 
@@ -393,6 +581,12 @@ export async function editWorkflowFromPrompt(params: {
   const existingWorkflow = getWorkflow(params.workspaceId, params.workflowId)
   const filePath = getWorkflowFilePath(params.workspaceId, params.workflowId)
 
+  params.onProgress?.({
+    stage: "preparing",
+    message: `Preparing edit for workflow "${params.workflowId}".`,
+    totalAttempts: MAX_WORKFLOW_AUTHORING_ATTEMPTS,
+  })
+
   const editPrompt = buildWorkflowEditPrompt({
     workflowName: existingWorkflow.name,
     workflowId: params.workflowId,
@@ -401,12 +595,25 @@ export async function editWorkflowFromPrompt(params: {
     relativeFilePath: existingWorkflow.relativePath,
   })
 
-  await runWorkflowGenerationAgent({
+  const editedWorkflow = await runWorkflowAuthoringWithRetries({
+    workspaceId: params.workspaceId,
+    workflowId: params.workflowId,
+    workflowName: existingWorkflow.name,
+    workspacePath: workspace.path,
+    relativeFilePath: existingWorkflow.relativePath,
+    filePath,
     agentId: params.agentId,
-    prompt: editPrompt,
-    cwd: workspace.path,
-    systemPrompt: workflowAuthorSystemPrompt,
+    initialPrompt: editPrompt,
+    userPrompt: params.prompt,
+    onProgress: params.onProgress,
+    onAgentOutput: params.onAgentOutput,
+    onAgentEvent: params.onAgentEvent,
   })
 
-  return finalizeWorkflowFile(params.workspaceId, params.workflowId, filePath)
+  params.onProgress?.({
+    stage: "completed",
+    message: `Workflow "${params.workflowId}" updated successfully.`,
+  })
+
+  return editedWorkflow
 }

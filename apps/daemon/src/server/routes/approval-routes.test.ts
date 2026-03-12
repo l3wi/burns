@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import { insertWorkspaceRow } from "@/db/repositories/workspace-repository"
 import { createApp } from "@/server/app"
+import { resolveTestWorkspacePath } from "@/testing/test-workspace-path"
 
 const originalFetch = globalThis.fetch
 
@@ -14,7 +15,7 @@ function seedWorkspace() {
   insertWorkspaceRow({
     id: workspaceId,
     name: workspaceId,
-    path: `/tmp/${workspaceId}`,
+    path: resolveTestWorkspacePath(workspaceId),
     sourceType: "create",
     runtimeMode: "burns-managed",
     healthStatus: "healthy",

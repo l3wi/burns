@@ -9,6 +9,7 @@ import {
   startWorkspaceSmithersServer,
   stopWorkspaceSmithersServer,
 } from "@/services/smithers-instance-service"
+import { resolveTestWorkspacePath } from "@/testing/test-workspace-path"
 
 const originalFetch = globalThis.fetch
 
@@ -19,7 +20,7 @@ function seedWorkspace(params: { runtimeMode: "burns-managed" | "self-managed"; 
   insertWorkspaceRow({
     id: workspaceId,
     name: workspaceId,
-    path: `/tmp/${workspaceId}`,
+    path: resolveTestWorkspacePath(workspaceId),
     sourceType: "create",
     runtimeMode: params.runtimeMode,
     smithersBaseUrl: params.smithersBaseUrl,

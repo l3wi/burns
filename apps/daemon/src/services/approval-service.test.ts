@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { findApprovalRow } from "@/db/repositories/approval-repository"
 import { insertWorkspaceRow } from "@/db/repositories/workspace-repository"
 import { decideApproval, listApprovals, syncApprovalFromEvent } from "@/services/approval-service"
+import { resolveTestWorkspacePath } from "@/testing/test-workspace-path"
 
 const originalFetch = globalThis.fetch
 
@@ -14,7 +15,7 @@ function seedWorkspace(workspaceId = `test-workspace-${randomUUID()}`) {
   insertWorkspaceRow({
     id: workspaceId,
     name: workspaceId,
-    path: `/tmp/${workspaceId}`,
+    path: resolveTestWorkspacePath(workspaceId),
     sourceType: "create",
     runtimeMode: "burns-managed",
     healthStatus: "healthy",

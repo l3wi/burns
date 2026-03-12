@@ -6,6 +6,9 @@ import {
   approvalSchema,
   type CancelRunInput,
   type CreateWorkspaceInput,
+  type DeleteWorkspaceInput,
+  type DeleteWorkspaceResult,
+  deleteWorkspaceResultSchema,
   type EditWorkflowInput,
   type GenerateWorkflowInput,
   type Run,
@@ -18,7 +21,9 @@ import {
   settingsSchema,
   type UpdateWorkflowInput,
   type Workflow,
+  type WorkflowAuthoringStreamEvent,
   type WorkflowDocument,
+  workflowAuthoringStreamEventSchema,
   workflowDocumentSchema,
   workflowSchema,
   type Workspace,
@@ -30,6 +35,7 @@ import { z } from "zod"
 
 const workspaceListSchema = z.array(workspaceSchema)
 const workspaceServerStatusDtoSchema = workspaceServerStatusSchema
+const deleteWorkspaceResultDtoSchema = deleteWorkspaceResultSchema
 const workflowListSchema = z.array(workflowSchema)
 const workflowDocumentListSchema = workflowDocumentSchema
 const agentCliListSchema = z.array(agentCliSchema)
@@ -71,6 +77,11 @@ function extractErrorMessage(payload: unknown): string | null {
   return null
 }
 
+export type WorkflowAuthoringStreamOptions = {
+  onEvent?: (event: WorkflowAuthoringStreamEvent) => void
+  signal?: AbortSignal
+}
+
 export class BurnsClient {
   private readonly baseUrl: string
 
@@ -103,6 +114,18 @@ export class BurnsClient {
     })
 
     return workspaceSchema.parse(data)
+  }
+
+  async deleteWorkspace(
+    workspaceId: string,
+    input: DeleteWorkspaceInput
+  ): Promise<DeleteWorkspaceResult> {
+    const data = await this.request<unknown>(`/api/workspaces/${workspaceId}`, {
+      method: "DELETE",
+      body: JSON.stringify(input),
+    })
+
+    return deleteWorkspaceResultDtoSchema.parse(data)
   }
 
   async getWorkspaceServerStatus(workspaceId: string): Promise<WorkspaceServerStatus> {
@@ -197,6 +220,18 @@ export class BurnsClient {
     return workflowDocumentListSchema.parse(data)
   }
 
+  async generateWorkflowStream(
+    workspaceId: string,
+    input: GenerateWorkflowInput,
+    options: WorkflowAuthoringStreamOptions = {}
+  ): Promise<WorkflowDocument> {
+    return this.requestWorkflowAuthoringStream(
+      `/api/workspaces/${workspaceId}/workflows/generate/stream`,
+      input,
+      options
+    )
+  }
+
   async editWorkflow(
     workspaceId: string,
     workflowId: string,
@@ -211,6 +246,19 @@ export class BurnsClient {
     )
 
     return workflowDocumentListSchema.parse(data)
+  }
+
+  async editWorkflowStream(
+    workspaceId: string,
+    workflowId: string,
+    input: EditWorkflowInput,
+    options: WorkflowAuthoringStreamOptions = {}
+  ): Promise<WorkflowDocument> {
+    return this.requestWorkflowAuthoringStream(
+      `/api/workspaces/${workspaceId}/workflows/${workflowId}/edit/stream`,
+      input,
+      options
+    )
   }
 
   async deleteWorkflow(workspaceId: string, workflowId: string): Promise<void> {
@@ -324,6 +372,92 @@ export class BurnsClient {
     )
 
     return approvalSchema.parse(data)
+  }
+
+  private async requestWorkflowAuthoringStream(
+    pathname: string,
+    input: GenerateWorkflowInput | EditWorkflowInput,
+    options: WorkflowAuthoringStreamOptions
+  ): Promise<WorkflowDocument> {
+    const response = await fetch(new URL(pathname, this.baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/x-ndjson",
+      },
+      body: JSON.stringify(input),
+      signal: options.signal,
+    })
+
+    if (!response.ok) {
+      let message = `Burns API request failed: ${response.status}`
+
+      try {
+        const errorBody = (await response.json()) as unknown
+        const parsedMessage = extractErrorMessage(errorBody)
+        if (parsedMessage) {
+          message = parsedMessage
+        }
+      } catch {
+        // Ignore invalid JSON error bodies.
+      }
+
+      throw new Error(message)
+    }
+
+    if (!response.body) {
+      throw new Error("Workflow authoring stream did not include a response body")
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    let workflowResult: WorkflowDocument | null = null
+
+    const consumeLine = (line: string) => {
+      const trimmedLine = line.trim()
+      if (!trimmedLine) {
+        return
+      }
+
+      const parsedPayload = JSON.parse(trimmedLine)
+      const event = workflowAuthoringStreamEventSchema.parse(parsedPayload)
+      options.onEvent?.(event)
+
+      if (event.type === "error") {
+        throw new Error(event.message)
+      }
+
+      if (event.type === "result") {
+        workflowResult = event.workflow
+      }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value ?? undefined, { stream: !done })
+
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+
+      for (const line of lines) {
+        consumeLine(line)
+      }
+
+      if (done) {
+        break
+      }
+    }
+
+    if (buffer.trim()) {
+      consumeLine(buffer)
+    }
+
+    if (!workflowResult) {
+      throw new Error("Workflow authoring stream finished without a generated workflow")
+    }
+
+    return workflowResult
   }
 
   private async request<T>(pathname: string, init?: RequestInit): Promise<T> {

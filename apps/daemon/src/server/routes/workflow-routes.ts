@@ -1,9 +1,11 @@
 import {
   editWorkflowInputSchema,
   generateWorkflowInputSchema,
+  type WorkflowAuthoringStreamEvent,
   updateWorkflowInputSchema,
 } from "@mr-burns/shared"
 
+import type { AgentCliEvent } from "@/agents/BaseCliAgent"
 import {
   deleteWorkflow,
   editWorkflowFromPrompt,
@@ -14,8 +16,170 @@ import {
 } from "@/services/workflow-service"
 import { toErrorResponse } from "@/utils/http-error"
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  return "Workflow authoring failed"
+}
+
+function toWorkflowAuthoringAgentEvent(event: AgentCliEvent): WorkflowAuthoringStreamEvent {
+  const timestamp = new Date().toISOString()
+
+  if (event.type === "started") {
+    return {
+      type: "agent-event",
+      eventType: "started",
+      engine: event.engine,
+      title: event.title,
+      message: event.resume ? `Session started (${event.resume})` : "Session started",
+      resume: event.resume,
+      detail: event.detail,
+      timestamp,
+    }
+  }
+
+  if (event.type === "action") {
+    return {
+      type: "agent-event",
+      eventType: "action",
+      engine: event.engine,
+      title: event.action.title,
+      message: event.message,
+      phase: event.phase,
+      actionId: event.action.id,
+      actionKind: event.action.kind,
+      entryType: event.entryType,
+      ok: event.ok,
+      level: event.level,
+      detail: event.action.detail,
+      timestamp,
+    }
+  }
+
+  return {
+    type: "agent-event",
+    eventType: "completed",
+    engine: event.engine,
+    title: "completed",
+    message: event.ok
+      ? "Run completed successfully"
+      : event.error || "Run completed with errors",
+    resume: event.resume,
+    ok: event.ok,
+    answer: event.answer,
+    error: event.error,
+    usage: event.usage,
+    timestamp,
+  }
+}
+
+function createWorkflowAuthoringStreamResponse(
+  run: (emit: (event: WorkflowAuthoringStreamEvent) => void) => Promise<void>
+) {
+  const encoder = new TextEncoder()
+  let keepaliveTimer: ReturnType<typeof setInterval> | null = null
+  let closed = false
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      keepaliveTimer = setInterval(() => {
+        if (closed) {
+          return
+        }
+
+        // Keep the connection active for long-running CLI generations.
+        // Client parser ignores blank lines.
+        controller.enqueue(encoder.encode("\n"))
+      }, 3000)
+
+      const emit = (event: WorkflowAuthoringStreamEvent) => {
+        if (closed) {
+          return
+        }
+        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
+      }
+
+      try {
+        await run(emit)
+      } catch (error) {
+        emit({
+          type: "error",
+          message: getErrorMessage(error),
+          timestamp: new Date().toISOString(),
+        })
+      } finally {
+        closed = true
+        if (keepaliveTimer) {
+          clearInterval(keepaliveTimer)
+          keepaliveTimer = null
+        }
+        controller.close()
+      }
+    },
+    cancel() {
+      closed = true
+      if (keepaliveTimer) {
+        clearInterval(keepaliveTimer)
+        keepaliveTimer = null
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/x-ndjson",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    },
+  })
+}
+
 export async function handleWorkflowRoutes(request: Request, pathname: string) {
   try {
+    const workflowGenerateStreamMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/workflows\/generate\/stream$/
+    )
+    if (workflowGenerateStreamMatch && request.method === "POST") {
+      const input = generateWorkflowInputSchema.parse(await request.json())
+      const workspaceId = workflowGenerateStreamMatch[1]
+
+      return createWorkflowAuthoringStreamResponse(async (emit) => {
+        const workflow = await generateWorkflowFromPrompt({
+          workspaceId,
+          ...input,
+          onProgress: (progress) => {
+            emit({
+              type: "status",
+              stage: progress.stage,
+              message: progress.message,
+              attempt: progress.attempt,
+              totalAttempts: progress.totalAttempts,
+              timestamp: new Date().toISOString(),
+            })
+          },
+          onAgentOutput: (output) => {
+            emit({
+              type: "agent-output",
+              stream: output.stream,
+              chunk: output.chunk,
+              timestamp: new Date().toISOString(),
+            })
+          },
+          onAgentEvent: (event) => {
+            emit(toWorkflowAuthoringAgentEvent(event))
+          },
+        })
+
+        emit({
+          type: "result",
+          workflow,
+          timestamp: new Date().toISOString(),
+        })
+      })
+    }
+
     const workflowGenerateMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/workflows\/generate$/)
     if (workflowGenerateMatch && request.method === "POST") {
       const input = generateWorkflowInputSchema.parse(await request.json())
@@ -26,6 +190,50 @@ export async function handleWorkflowRoutes(request: Request, pathname: string) {
         }),
         { status: 201 }
       )
+    }
+
+    const workflowEditStreamMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/workflows\/([^/]+)\/edit\/stream$/
+    )
+    if (workflowEditStreamMatch && request.method === "POST") {
+      const input = editWorkflowInputSchema.parse(await request.json())
+      const workspaceId = workflowEditStreamMatch[1]
+      const workflowId = workflowEditStreamMatch[2]
+
+      return createWorkflowAuthoringStreamResponse(async (emit) => {
+        const workflow = await editWorkflowFromPrompt({
+          workspaceId,
+          workflowId,
+          ...input,
+          onProgress: (progress) => {
+            emit({
+              type: "status",
+              stage: progress.stage,
+              message: progress.message,
+              attempt: progress.attempt,
+              totalAttempts: progress.totalAttempts,
+              timestamp: new Date().toISOString(),
+            })
+          },
+          onAgentOutput: (output) => {
+            emit({
+              type: "agent-output",
+              stream: output.stream,
+              chunk: output.chunk,
+              timestamp: new Date().toISOString(),
+            })
+          },
+          onAgentEvent: (event) => {
+            emit(toWorkflowAuthoringAgentEvent(event))
+          },
+        })
+
+        emit({
+          type: "result",
+          workflow,
+          timestamp: new Date().toISOString(),
+        })
+      })
     }
 
     const workflowEditMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/workflows\/([^/]+)\/edit$/)

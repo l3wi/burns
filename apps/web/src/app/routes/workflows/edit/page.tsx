@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { useAgentClis } from "@/features/agents/hooks/use-agent-clis"
+import { WorkflowAuthoringConversationPanel } from "@/features/workflows/components/workflow-authoring-conversation-panel"
 import { useEditWorkflow } from "@/features/workflows/hooks/use-edit-workflow"
 import { useWorkflow } from "@/features/workflows/hooks/use-workflow"
 import { useWorkflows } from "@/features/workflows/hooks/use-workflows"
@@ -53,7 +54,7 @@ import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-works
 export function EditWorkflowPage() {
   const navigate = useNavigate()
   const { workflowId } = useParams()
-  const { workspace } = useActiveWorkspace()
+  const { workspace, workspaceId } = useActiveWorkspace()
   const { data: agentClis = [], isLoading: isAgentListLoading } = useAgentClis()
   const { data: workflows = [], isLoading: isWorkflowListLoading } = useWorkflows(workspace?.id)
   const { data: workflowDocument, isLoading: isWorkflowLoading } = useWorkflow(
@@ -68,6 +69,7 @@ export function EditWorkflowPage() {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("")
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false)
   const resolvedSelectedAgentId = selectedAgentId || agentClis[0]?.id || ""
+  const workflowsBasePath = workspaceId ? `/w/${workspaceId}/workflows` : "/"
 
   useEffect(() => {
     if (!workflowId || isWorkflowListLoading) {
@@ -75,9 +77,9 @@ export function EditWorkflowPage() {
     }
 
     if (workflows.every((workflow) => workflow.id !== workflowId)) {
-      navigate("/workflows", { replace: true })
+      navigate(workflowsBasePath, { replace: true })
     }
-  }, [isWorkflowListLoading, navigate, workflowId, workflows])
+  }, [isWorkflowListLoading, navigate, workflowId, workflows, workflowsBasePath])
 
   const selectedAgent = useMemo(
     () => agentClis.find((agent) => agent.id === resolvedSelectedAgentId) ?? null,
@@ -86,7 +88,11 @@ export function EditWorkflowPage() {
 
   const previewWorkflow = editWorkflow.data ?? workflowDocument ?? null
 
-  const submitStatus = editWorkflow.isPending ? "submitted" : "ready"
+  const submitStatus = editWorkflow.isPending ? "streaming" : "ready"
+  const errorMessage =
+    editWorkflow.error?.message === "[object Object]"
+      ? "Workflow edit failed with a malformed error payload. Check daemon logs for details."
+      : editWorkflow.error?.message ?? null
 
   function handleAgentSubmit(message: PromptInputMessage) {
     if (!workspace || !workflowId || !resolvedSelectedAgentId) {
@@ -106,13 +112,13 @@ export function EditWorkflowPage() {
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="grid gap-4 p-6 xl:grid-cols-[28rem_1fr]">
-        <Card>
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-x-hidden xl:overflow-y-hidden">
+      <div className="grid w-full min-w-0 max-w-full gap-4 p-6 xl:h-full xl:min-h-0 xl:grid-cols-[28rem_1fr] xl:overflow-hidden">
+        <Card className="min-w-0 xl:flex xl:min-h-0 xl:flex-col">
           <CardHeader>
             <CardTitle>Workflow editor agent</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="workflow-name">Workflow name</FieldLabel>
@@ -193,30 +199,36 @@ export function EditWorkflowPage() {
                         isAgentListLoading ||
                         isWorkflowLoading
                       }
+                      onStop={editWorkflow.cancel}
                       status={submitStatus}
                     />
                   </PromptInputFooter>
                 </PromptInput>
               </Field>
 
-              {editWorkflow.error ? (
+              {errorMessage ? (
                 <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                  {editWorkflow.error.message}
+                  {errorMessage}
                 </div>
               ) : null}
             </FieldGroup>
           </CardContent>
         </Card>
 
-        <div className="grid gap-4">
-          <Card>
+        <div className="grid min-w-0 gap-4 xl:h-full xl:min-h-0">
+          <Card className="min-w-0 xl:flex xl:min-h-0 xl:flex-col">
             <CardHeader>
               <CardTitle>Updated workflow</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4">
-              {previewWorkflow ? (
+            <CardContent className="grid min-w-0 gap-4 xl:min-h-0 xl:flex-1">
+              {editWorkflow.isPending ? (
+                <WorkflowAuthoringConversationPanel
+                  isStreaming={editWorkflow.isPending}
+                  items={editWorkflow.conversationItems}
+                />
+              ) : previewWorkflow ? (
                 <CodeBlock
-                  className="max-h-[36rem]"
+                  className="h-full min-h-0"
                   code={previewWorkflow.source}
                   language="tsx"
                   showLineNumbers
@@ -231,8 +243,8 @@ export function EditWorkflowPage() {
                   </CodeBlockHeader>
                 </CodeBlock>
               ) : (
-                <div className="flex min-h-[28rem] items-center justify-center rounded-xl border px-6 text-sm text-muted-foreground">
-                  Load a workflow, then submit an edit prompt to preview the updated file.
+                <div className="flex h-full min-h-0 items-center justify-center rounded-xl border px-6 text-sm text-muted-foreground">
+                  Load a workflow, then submit an edit prompt. The preview updates when editing completes.
                 </div>
               )}
             </CardContent>

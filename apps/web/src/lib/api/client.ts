@@ -1,12 +1,13 @@
 import { BurnsClient } from "@mr-burns/client"
+import { resolveBurnsApiUrlFromBrowserRuntime } from "@/lib/api/resolve-burns-api-url"
 
-export const BURNS_API_URL = import.meta.env.VITE_BURNS_API_URL ?? "http://localhost:7332"
+export const BURNS_API_URL = resolveBurnsApiUrlFromBrowserRuntime()
 
 export const burnsClient = new BurnsClient(BURNS_API_URL)
 
 export function isLocalhostBurnsApiUrl() {
   try {
-    const parsedUrl = new URL(BURNS_API_URL, window.location.origin)
+    const parsedUrl = new URL(BURNS_API_URL)
     return (
       parsedUrl.hostname === "localhost" ||
       parsedUrl.hostname === "127.0.0.1" ||

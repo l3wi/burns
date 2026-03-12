@@ -1,0 +1,195 @@
+import { getLogger, type BurnsLogger } from "@/logging/logger"
+import { createApp, type DaemonApp } from "@/server/app"
+import { DAEMON_HEALTH_PATH } from "@/server/routes/health-routes"
+import {
+  shutdownWorkspaceSmithersInstances,
+  warmWorkspaceSmithersInstances,
+} from "@/services/smithers-instance-service"
+import { initializeWorkspaceService, listWorkspaces } from "@/services/workspace-service"
+
+type DaemonServer = {
+  fetch: unknown
+  port?: number
+  stop: (closeActiveConnections?: boolean) => void
+}
+
+type DaemonStartOptions = {
+  port?: number
+}
+
+type DaemonStopSignal = "SIGINT" | "SIGTERM" | "programmatic"
+
+type DaemonStopOptions = {
+  signal?: DaemonStopSignal
+}
+
+export type DaemonRuntimeHandle = {
+  server: DaemonServer
+  port: number
+  url: string
+  healthUrl: string
+  startedAt: string
+  stop: () => Promise<void>
+}
+
+type DaemonLifecycle = {
+  start: (options?: DaemonStartOptions) => Promise<DaemonRuntimeHandle>
+  stop: (options?: DaemonStopOptions) => Promise<void>
+  getRuntime: () => DaemonRuntimeHandle | null
+}
+
+type DaemonLifecycleDependencies = {
+  logger?: BurnsLogger
+  now?: () => number
+  createApp?: (options: { logger?: BurnsLogger; port?: number }) => DaemonApp
+  serve?: (options: DaemonApp & { idleTimeout: number }) => DaemonServer
+  initializeWorkspaceService?: typeof initializeWorkspaceService
+  listWorkspaces?: typeof listWorkspaces
+  warmWorkspaceSmithersInstances?: (
+    workspaces: ReturnType<typeof listWorkspaces>
+  ) => ReturnType<typeof warmWorkspaceSmithersInstances>
+  shutdownWorkspaceSmithersInstances?: typeof shutdownWorkspaceSmithersInstances
+}
+
+const DEFAULT_IDLE_TIMEOUT_SECONDS = 120
+
+function defaultServe(options: DaemonApp & { idleTimeout: number }): DaemonServer {
+  return Bun.serve(options)
+}
+
+export function createDaemonLifecycle(dependencies: DaemonLifecycleDependencies = {}): DaemonLifecycle {
+  const logger = (dependencies.logger ?? getLogger()).child({ component: "bootstrap" })
+  const now = dependencies.now ?? Date.now
+  const buildApp = dependencies.createApp ?? createApp
+  const serve = dependencies.serve ?? defaultServe
+  const initWorkspaceService = dependencies.initializeWorkspaceService ?? initializeWorkspaceService
+  const getWorkspaceList = dependencies.listWorkspaces ?? listWorkspaces
+  const warmWorkspaceInstances =
+    dependencies.warmWorkspaceSmithersInstances ?? warmWorkspaceSmithersInstances
+  const shutdownWorkspaceInstances =
+    dependencies.shutdownWorkspaceSmithersInstances ?? shutdownWorkspaceSmithersInstances
+
+  let runtime: DaemonRuntimeHandle | null = null
+  let startPromise: Promise<DaemonRuntimeHandle> | null = null
+  let stopPromise: Promise<void> | null = null
+
+  async function start(options: DaemonStartOptions = {}) {
+    if (runtime) {
+      return runtime
+    }
+
+    if (startPromise) {
+      return startPromise
+    }
+
+    startPromise = (async () => {
+      logger.info({ event: "daemon.startup.begin" }, "Starting Mr. Burns daemon")
+
+      try {
+        initWorkspaceService()
+        void warmWorkspaceInstances(getWorkspaceList())
+
+        const app = buildApp({ port: options.port })
+        const server = serve({
+          ...app,
+          // Workflow authoring streams can be quiet for >10s while a CLI agent works.
+          // Keep idle timeout high enough for long-running generation/edit sessions.
+          idleTimeout: DEFAULT_IDLE_TIMEOUT_SECONDS,
+        })
+
+        const resolvedPort = typeof server.port === "number" ? server.port : app.port
+        const url = `http://localhost:${resolvedPort}`
+        const startedAt = new Date(now()).toISOString()
+
+        runtime = {
+          server,
+          port: resolvedPort,
+          url,
+          healthUrl: `${url}${DAEMON_HEALTH_PATH}`,
+          startedAt,
+          stop: () => stop({ signal: "programmatic" }),
+        }
+
+        logger.info(
+          {
+            event: "daemon.startup.complete",
+            port: runtime.port,
+            url: runtime.url,
+            healthUrl: runtime.healthUrl,
+            startedAt: runtime.startedAt,
+            hasFetchHandler: typeof server.fetch === "function",
+          },
+          "Mr. Burns daemon is listening"
+        )
+
+        return runtime
+      } catch (error) {
+        logger.error({ event: "daemon.startup.failed", err: error }, "Failed to start daemon")
+        throw error
+      }
+    })().finally(() => {
+      startPromise = null
+    })
+
+    return startPromise
+  }
+
+  async function stop(options: DaemonStopOptions = {}) {
+    if (stopPromise) {
+      return stopPromise
+    }
+
+    const signal = options.signal ?? "programmatic"
+
+    stopPromise = (async () => {
+      if (startPromise && !runtime) {
+        try {
+          await startPromise
+        } catch {
+          return
+        }
+      }
+
+      if (!runtime) {
+        return
+      }
+
+      logger.info({ event: "daemon.shutdown.begin", signal }, "Shutting down Mr. Burns daemon")
+
+      try {
+        await shutdownWorkspaceInstances()
+        runtime.server.stop(true)
+        runtime = null
+        logger.info({ event: "daemon.shutdown.complete", signal }, "Mr. Burns daemon stopped")
+      } catch (error) {
+        logger.error(
+          { event: "daemon.shutdown.failed", signal, err: error },
+          "Failed shutting down daemon cleanly"
+        )
+        throw error
+      }
+    })().finally(() => {
+      stopPromise = null
+    })
+
+    return stopPromise
+  }
+
+  function getRuntime() {
+    return runtime
+  }
+
+  return {
+    start,
+    stop,
+    getRuntime,
+  }
+}
+
+const daemonLifecycle = createDaemonLifecycle()
+
+export const startDaemon = daemonLifecycle.start
+export const stopDaemon = daemonLifecycle.stop
+export const getDaemonRuntime = daemonLifecycle.getRuntime
+
+export type { DaemonStartOptions, DaemonStopOptions, DaemonStopSignal }

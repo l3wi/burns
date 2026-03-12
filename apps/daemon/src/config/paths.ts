@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url"
 
 const configDir = path.dirname(fileURLToPath(import.meta.url))
 const daemonRoot = path.resolve(configDir, "../..")
-const dataRoot = path.join(daemonRoot, ".data")
+const configuredDataRoot = process.env.BURNS_DATA_ROOT?.trim()
+const dataRoot =
+  configuredDataRoot && configuredDataRoot.length > 0
+    ? path.resolve(configuredDataRoot)
+    : path.join(daemonRoot, ".data")
 
 mkdirSync(dataRoot, { recursive: true })
 

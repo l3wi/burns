@@ -90,3 +90,16 @@ export function insertRunEventRow(
       event.message ?? null
     )
 }
+
+export function deleteRunEventRowsByWorkspaceId(workspaceId: string) {
+  const result = db
+    .query(
+      `
+        DELETE FROM run_events
+        WHERE workspace_id = ?1
+      `
+    )
+    .run(workspaceId)
+
+  return result.changes
+}
