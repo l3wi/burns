@@ -13,5 +13,5 @@ export function resolveDaemonLifecyclePath() {
 }
 
 export function resolveWebDistPath() {
-  return path.join(resolveWorkspaceRoot(), "apps/web/dist")
+  return path.join(resolveWorkspaceRoot(), "dist/web")
 }

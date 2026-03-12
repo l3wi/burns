@@ -73,9 +73,16 @@ else
   resolved_output_dir="${repo_root}/${output_dir}"
 fi
 
-desktop_dist_dir="${repo_root}/apps/desktop/dist"
-if [[ ! -d "$desktop_dist_dir" ]]; then
-  echo "Desktop build output directory not found: $desktop_dist_dir" >&2
+desktop_build_dir="${repo_root}/dist/desktop/build"
+desktop_artifact_dir="${repo_root}/dist/desktop/artifacts"
+
+if [[ ! -d "$desktop_build_dir" ]]; then
+  echo "Desktop build output directory not found: $desktop_build_dir" >&2
+  exit 1
+fi
+
+if [[ ! -d "$desktop_artifact_dir" ]]; then
+  echo "Desktop artifact directory not found: $desktop_artifact_dir" >&2
   exit 1
 fi
 
@@ -83,7 +90,7 @@ mkdir -p "$resolved_output_dir"
 archive_name="mr-burns-desktop-${channel}-${version}.tar.gz"
 archive_path="${resolved_output_dir}/${archive_name}"
 
-echo "[desktop artifact] archiving ${desktop_dist_dir} -> ${archive_path}"
-tar -czf "$archive_path" -C "${repo_root}/apps/desktop" "dist"
+echo "[desktop artifact] archiving dist/desktop/{build,artifacts} -> ${archive_path}"
+tar -czf "$archive_path" -C "${repo_root}" "dist/desktop/build" "dist/desktop/artifacts"
 
 echo "[desktop artifact] done: ${archive_path}"

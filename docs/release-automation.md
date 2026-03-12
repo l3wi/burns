@@ -99,7 +99,7 @@ bash scripts/release/build-cli-artifact.sh \
 
 ### `scripts/release/build-desktop-artifact.sh`
 
-Purpose: build ElectroBun desktop output and archive `apps/desktop/dist` into `dist/desktop`.
+Purpose: build ElectroBun desktop output and archive `dist/desktop/{build,artifacts}` into `dist/desktop`.
 
 Example:
 

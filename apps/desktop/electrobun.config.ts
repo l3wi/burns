@@ -11,8 +11,10 @@ export default {
     bun: {
       entrypoint: "./src/index.ts",
     },
+    buildFolder: "../../dist/desktop/build",
+    artifactFolder: "../../dist/desktop/artifacts",
     copy: {
-      "../web/dist": "views/mainview",
+      "../../dist/web": "views/mainview",
     },
     mac: {
       bundleCEF: false,

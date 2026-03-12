@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs"
 import { join } from "node:path"
 
-const webDistDir = join(import.meta.dir, "..", "..", "web", "dist")
+const webDistDir = join(import.meta.dir, "..", "..", "..", "dist", "web")
 const webDistIndex = join(webDistDir, "index.html")
 
 if (!existsSync(webDistDir) || !statSync(webDistDir).isDirectory()) {

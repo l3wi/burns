@@ -24,7 +24,7 @@ bun run src/bin.ts --help
 
 ### `burns start`
 
-Starts daemon and (when available) serves prebuilt web assets from `apps/web/dist`.
+Starts daemon and (when available) serves prebuilt web assets from `dist/web`.
 
 ```bash
 burns start
@@ -45,7 +45,7 @@ burns daemon
 
 ### `burns web`
 
-Serves static web assets from `apps/web/dist`.
+Serves static web assets from `dist/web`.
 
 ```bash
 burns web
@@ -57,7 +57,7 @@ Options:
 - `--port <port>`: bind port (default: `4173`)
 - `--open`: open served URL in your browser
 
-If `apps/web/dist` is missing, the CLI prints guidance to run:
+If `dist/web` is missing, the CLI prints guidance to run:
 
 ```bash
 bun run build:web

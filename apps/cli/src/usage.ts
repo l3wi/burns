@@ -6,10 +6,10 @@ const FULL_USAGE = [
   "  burns daemon",
   "  burns web [--host <host>] [--port <port>] [--open]",
   "",
-"Commands:",
+  "Commands:",
   "  start   Start daemon and web UI server, optionally open the web URL in a browser.",
   "  daemon  Start daemon only.",
-  "  web     Serve prebuilt web assets from apps/web/dist.",
+  "  web     Serve prebuilt web assets from dist/web.",
 ].join("\n")
 
 const START_USAGE = [
