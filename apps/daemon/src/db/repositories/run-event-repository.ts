@@ -11,6 +11,7 @@ type RunEventRow = {
   node_id: string | null
   message: string | null
   raw_payload_json: string | null
+  dedupe_key: string | null
 }
 
 function parseRawPayload(rawPayloadJson: string | null): unknown {
@@ -61,7 +62,8 @@ export function listRunEventRows(workspaceId: string, runId: string, afterSeq = 
           timestamp,
           node_id,
           message,
-          raw_payload_json
+          raw_payload_json,
+          dedupe_key
         FROM run_events
         WHERE workspace_id = ?1
           AND run_id = ?2
@@ -91,7 +93,8 @@ export function getMaxRunEventSeq(workspaceId: string, runId: string) {
 
 export function insertRunEventRow(
   workspaceId: string,
-  event: RunEvent & { runId: string }
+  event: RunEvent & { runId: string },
+  options?: { dedupeKey?: string }
 ) {
   db
     .query(
@@ -104,8 +107,9 @@ export function insertRunEventRow(
           timestamp,
           node_id,
           message,
-          raw_payload_json
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+          raw_payload_json,
+          dedupe_key
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
       `
     )
     .run(
@@ -116,7 +120,8 @@ export function insertRunEventRow(
       event.timestamp,
       event.nodeId ?? null,
       event.message ?? null,
-      stringifyRawPayload(event.rawPayload)
+      stringifyRawPayload(event.rawPayload),
+      options?.dedupeKey ?? null
     )
 }
 

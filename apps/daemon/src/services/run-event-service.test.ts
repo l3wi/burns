@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import { insertRunEventRow, deleteRunEventRowsByWorkspaceId } from "@/db/repositories/run-event-repository"
 import { deleteWorkspaceRowById, insertWorkspaceRow } from "@/db/repositories/workspace-repository"
-import { listRunEvents } from "@/services/run-event-service"
+import { listRunEvents, persistSmithersEvent } from "@/services/run-event-service"
 import { resolveTestWorkspacePath } from "@/testing/test-workspace-path"
 
 const workspaceIdsToCleanup = new Set<string>()
@@ -49,6 +49,38 @@ afterEach(() => {
 })
 
 describe("run event service", () => {
+  it("deduplicates replayed Smithers payloads when seq is missing", () => {
+    const { workspaceId } = seedWorkspace()
+    const runId = "run-with-replayed-events"
+    const payload = {
+      type: "NodeOutput",
+      runId,
+      nodeId: "determine-intent",
+      iteration: 0,
+      attempt: 1,
+      stream: "stderr",
+      text: "line one\\nline two",
+      timestampMs: 1773336687918,
+    }
+
+    const first = persistSmithersEvent(workspaceId, runId, payload)
+    const second = persistSmithersEvent(workspaceId, runId, payload)
+    const events = listRunEvents(workspaceId, runId)
+
+    expect(first.seq).toBe(1)
+    expect(second.seq).toBe(2)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      seq: 1,
+      runId,
+      type: "NodeOutput",
+      nodeId: "determine-intent",
+      rawPayload: {
+        text: "line one\\nline two",
+      },
+    })
+  })
+
   it("hydrates missing raw payloads from workspace Smithers events", () => {
     const { workspaceId, workspacePath } = seedWorkspace()
     const runId = "run-with-node-output"

@@ -8,6 +8,55 @@ import { burnsClient } from "@/lib/api/client"
 const RECONNECT_DELAY_BASE_MS = 500
 const RECONNECT_DELAY_MAX_MS = 5000
 
+function stripSeqFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripSeqFields(entry))
+  }
+
+  if (!value || typeof value !== "object") {
+    return value
+  }
+
+  const objectValue = value as Record<string, unknown>
+  const normalized: Record<string, unknown> = {}
+  const keys = Object.keys(objectValue).sort()
+  for (const key of keys) {
+    if (key === "seq") {
+      continue
+    }
+
+    normalized[key] = stripSeqFields(objectValue[key])
+  }
+
+  return normalized
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`
+  }
+
+  if (value && typeof value === "object") {
+    const objectValue = value as Record<string, unknown>
+    const keys = Object.keys(objectValue).sort()
+    return `{${keys
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(objectValue[key])}`)
+      .join(",")}}`
+  }
+
+  return JSON.stringify(value) ?? "null"
+}
+
+function buildEventReplayKey(event: RunEvent) {
+  return stableStringify({
+    type: event.type,
+    timestamp: event.timestamp,
+    nodeId: event.nodeId ?? null,
+    message: event.message ?? null,
+    payload: event.rawPayload !== undefined ? stripSeqFields(event.rawPayload) : null,
+  })
+}
+
 function normalizeEventPayload(payload: unknown, fallbackRunId: string, fallbackSeq: number): RunEvent {
   const asObject =
     payload && typeof payload === "object" && !Array.isArray(payload)
@@ -101,10 +150,19 @@ export function useRunEvents(workspaceId?: string, runId?: string, options?: Use
       try {
         const parsedPayload = JSON.parse(event.data)
         const nextEvent = normalizeEventPayload(parsedPayload, runId, fallbackSeq)
+        const nextEventReplayKey = buildEventReplayKey(nextEvent)
 
         queryClient.setQueryData<RunEvent[]>(targetQueryKey, (previous) => {
           const safePrevious = previous ?? []
           if (safePrevious.some((entry) => entry.seq === nextEvent.seq)) {
+            return safePrevious
+          }
+
+          if (
+            safePrevious.some((entry) => {
+              return buildEventReplayKey(entry) === nextEventReplayKey
+            })
+          ) {
             return safePrevious
           }
 

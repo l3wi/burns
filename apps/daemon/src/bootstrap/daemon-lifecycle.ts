@@ -51,7 +51,9 @@ type DaemonLifecycleDependencies = {
   shutdownWorkspaceSmithersInstances?: typeof shutdownWorkspaceSmithersInstances
 }
 
-const DEFAULT_IDLE_TIMEOUT_SECONDS = 120
+// Bun.serve enforces a max idleTimeout of 255 seconds.
+// Long-running SSE routes are kept alive via heartbeat frames.
+const DEFAULT_IDLE_TIMEOUT_SECONDS = 255
 
 function defaultServe(options: DaemonApp & { idleTimeout: number }): DaemonServer {
   return Bun.serve(options)

@@ -14,7 +14,12 @@ The format follows Keep a Changelog and this project currently tracks SemVer-sty
 - Added raw Smithers event payload persistence on run events and a run-detail raw output panel tied to timeline selection.
 - Added legacy run-event hydration fallback from workspace Smithers `_smithers_events` when local mirrored events are missing `rawPayload`.
 - Updated workflow launch-field inference to collapse `ctx.input` nullish-coalescing chains (keep first key, omit fallback keys) so run forms avoid empty-string override traps.
+- Added run-event ingest deduplication keys so replayed SSE payloads without stable `seq` values are ignored.
+- Added node-run timeline aggregation and parsed text transcript rendering on run detail pages (collapsed from per-event rows).
+- Added parsed transcript extraction that keeps agent output blocks and strips `exec`/tool noise from NodeOutput logs.
+- Updated run detail header to show status/start time/summary counters inline and removed the separate run-summary card (with epoch-start fallback to first event timestamp).
 
 ### Changed
 
 - Updated root `README.md` with desktop/CLI release scaffold commands and release documentation links.
+- Increased daemon idle timeout to Bun's maximum (255 seconds) and added run-event SSE heartbeat frames to reduce long-idle stream disconnects.

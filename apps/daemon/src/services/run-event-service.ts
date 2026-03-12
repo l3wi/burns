@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs"
+import { createHash } from "node:crypto"
 import path from "node:path"
 
 import type { RunEvent } from "@mr-burns/shared"
@@ -57,6 +58,50 @@ function parseRawPayloadJson(payloadJson: string): unknown {
   } catch {
     return undefined
   }
+}
+
+function stripSeqFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripSeqFields(entry))
+  }
+
+  if (!value || typeof value !== "object") {
+    return value
+  }
+
+  const objectValue = value as Record<string, unknown>
+  const normalized: Record<string, unknown> = {}
+  const keys = Object.keys(objectValue).sort()
+  for (const key of keys) {
+    if (key === "seq") {
+      continue
+    }
+
+    normalized[key] = stripSeqFields(objectValue[key])
+  }
+
+  return normalized
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`
+  }
+
+  if (value && typeof value === "object") {
+    const objectValue = value as Record<string, unknown>
+    const keys = Object.keys(objectValue).sort()
+    return `{${keys
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(objectValue[key])}`)
+      .join(",")}}`
+  }
+
+  return JSON.stringify(value) ?? "null"
+}
+
+function buildRunEventDedupeKey(payload: unknown, fallbackPayload: Record<string, unknown>) {
+  const dedupeSource = payload !== undefined ? stripSeqFields(payload) : fallbackPayload
+  return createHash("sha256").update(stableStringify(dedupeSource)).digest("hex")
 }
 
 function toTimestampIso(value: unknown): string | undefined {
@@ -270,7 +315,15 @@ export function appendRunEvent(
       },
   }
 
-  insertRunEventRow(workspaceId, normalized)
+  const dedupeKey = buildRunEventDedupeKey(event.rawPayload, {
+    runId,
+    type: normalized.type,
+    timestamp: normalized.timestamp,
+    nodeId: normalized.nodeId ?? null,
+    message: normalized.message ?? null,
+  })
+
+  insertRunEventRow(workspaceId, normalized, { dedupeKey })
   return normalized
 }
 
@@ -306,6 +359,15 @@ export function persistSmithersEvent(workspaceId: string, runId: string, payload
     rawPayload: payload,
   }
 
-  insertRunEventRow(workspaceId, normalized)
+  const dedupeKey = buildRunEventDedupeKey(payload, {
+    runId: eventRunId,
+    type: normalized.type,
+    timestamp: asString(objectPayload?.timestamp) ?? null,
+    timestampMs: asNumber(objectPayload?.timestampMs) ?? null,
+    nodeId: normalized.nodeId ?? null,
+    message: normalized.message ?? null,
+  })
+
+  insertRunEventRow(workspaceId, normalized, { dedupeKey })
   return normalized
 }

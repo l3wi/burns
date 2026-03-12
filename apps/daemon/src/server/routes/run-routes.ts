@@ -20,6 +20,7 @@ const MAX_BACKGROUND_EVENT_STREAMS = 32
 const BACKGROUND_EVENT_RETRY_BASE_MS = 500
 const BACKGROUND_EVENT_RETRY_MAX_MS = 10_000
 const BACKGROUND_EVENT_IDLE_TIMEOUT_MS = 15 * 60 * 1_000
+const RUN_EVENTS_HEARTBEAT_INTERVAL_MS = 15_000
 
 type BackgroundEventIngestion = {
   key: string
@@ -328,7 +329,7 @@ async function runBackgroundEventIngestion(state: BackgroundEventIngestion) {
           payload
         )
         sawEvent = true
-        state.lastSeq = Math.max(state.lastSeq, persistedEvent.seq)
+        state.lastSeq = getLatestRunEventSeq(state.workspaceId, state.runId)
         state.lastActivityAt = Date.now()
 
         return isTerminalEventType(persistedEvent.type) ? "terminal" : null
@@ -382,6 +383,25 @@ async function createEventProxyStream(workspaceId: string, runId: string, afterS
   const encoder = new TextEncoder()
   const ingestionKey = buildBackgroundIngestionKey(workspaceId, runId)
   let streamReader: { cancel: () => Promise<void> } | null = null
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  let closed = false
+
+  const clearHeartbeat = () => {
+    if (!heartbeatTimer) {
+      return
+    }
+
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+  }
+
+  const enqueueFrame = (controller: ReadableStreamDefaultController<Uint8Array>, frame: string) => {
+    if (closed) {
+      return
+    }
+
+    controller.enqueue(encoder.encode(`${frame}\n\n`))
+  }
   const shouldPersistInProxy = () => {
     const activeIngestion = backgroundEventIngestions.get(ingestionKey)
     return !activeIngestion || activeIngestion.streamReader === null
@@ -389,6 +409,11 @@ async function createEventProxyStream(workspaceId: string, runId: string, afterS
 
   return new ReadableStream({
     async start(controller) {
+      heartbeatTimer = setInterval(() => {
+        // SSE comment frame to keep long-running idle streams alive.
+        enqueueFrame(controller, ": heartbeat")
+      }, RUN_EVENTS_HEARTBEAT_INTERVAL_MS)
+
       let streamResult: UpstreamStreamExitReason
       try {
         streamResult = await consumeUpstreamRunEventStream({
@@ -409,22 +434,30 @@ async function createEventProxyStream(workspaceId: string, runId: string, afterS
             return null
           },
           onFrame: (frame) => {
-            controller.enqueue(encoder.encode(`${frame}\n\n`))
+            enqueueFrame(controller, frame)
           },
         })
       } catch (error) {
+        closed = true
+        clearHeartbeat()
         controller.error(error)
         return
       }
 
       if (streamResult === "non-sse") {
+        closed = true
+        clearHeartbeat()
         controller.error(new Error("Smithers upstream did not return an SSE stream"))
         return
       }
 
+      closed = true
+      clearHeartbeat()
       controller.close()
     },
     async cancel() {
+      closed = true
+      clearHeartbeat()
       if (!streamReader) {
         return
       }

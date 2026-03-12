@@ -46,6 +46,7 @@ db.exec(`
     node_id TEXT,
     message TEXT,
     raw_payload_json TEXT,
+    dedupe_key TEXT,
     PRIMARY KEY (workspace_id, run_id, seq)
   );
 `)
@@ -58,6 +59,16 @@ const runEventColumnNames = new Set(runEventColumns.map((column) => column.name)
 if (!runEventColumnNames.has("raw_payload_json")) {
   db.exec(`ALTER TABLE run_events ADD COLUMN raw_payload_json TEXT;`)
 }
+
+if (!runEventColumnNames.has("dedupe_key")) {
+  db.exec(`ALTER TABLE run_events ADD COLUMN dedupe_key TEXT;`)
+}
+
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS run_events_dedupe_key_idx
+    ON run_events(workspace_id, run_id, dedupe_key)
+    WHERE dedupe_key IS NOT NULL;
+`)
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS approvals (
