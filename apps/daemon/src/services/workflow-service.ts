@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import path from "node:path"
 
 import type {
+  AgentCli,
   Workflow,
   WorkflowAuthoringStage,
   WorkflowDocument,
@@ -10,7 +11,7 @@ import type {
 
 import type { AgentCliEvent } from "@/agents/BaseCliAgent"
 import { defaultWorkflowTemplates } from "@/domain/workflows/templates"
-import { runWorkflowGenerationAgent } from "@/services/agent-cli-service"
+import { listInstalledAgentClis, runWorkflowGenerationAgent } from "@/services/agent-cli-service"
 import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
 import { slugify } from "@/utils/slugify"
@@ -39,6 +40,154 @@ export default smithers((ctx) => (
     </Sequence>
   </Workflow>
 ))`
+
+const smithersGuideLinks = [
+  "https://smithers.sh/guides/tutorial-workflow",
+  "https://smithers.sh/guides/patterns",
+  "https://smithers.sh/guides/project-structure",
+  "https://smithers.sh/guides/best-practices",
+  "https://smithers.sh/guides/model-selection",
+  "https://smithers.sh/guides/review-loop",
+  "https://smithers.sh/guides/mdx-prompts",
+  "https://smithers.sh/guides/structured-output",
+  "https://smithers.sh/guides/error-handling",
+]
+
+const smithersGuideDigest = [
+  "Smithers authoring guidance (apply when relevant):",
+  "- Tutorial workflow: start from a clear entry task that reads ctx.input and then sequence downstream steps.",
+  "- Patterns: use Sequence/Parallel/Branch/Ralph intentionally; choose deterministic node IDs and explicit control flow.",
+  "- Project structure: for Mr. Burns, keep the primary workflow in the requested target file unless the user explicitly asks for a multi-file component split.",
+  "- Best practices: keep prompts task-specific, preserve stable task IDs, keep tasks composable, and avoid hidden side effects.",
+  "- Model selection: use stronger models for planning/review-heavy tasks and faster models for straightforward transform tasks.",
+  "- Review loop: when quality gates are requested, model them with bounded Ralph loops and explicit stop conditions.",
+  "- MDX prompts: only use MDX prompt files when the user asks for prompt externalization or workflow complexity justifies it.",
+  "- Structured output: define clear schemas and keep Task output wired through outputs.<schemaKey> consistently.",
+  "- Error handling: prefer explicit retries/timeouts/branches and graceful failure paths over silent failures.",
+  "Guide references:",
+  ...smithersGuideLinks.map((link) => `- ${link}`),
+].join("\n")
+
+const smithersSyntaxReference = [
+  "Smithers syntax quick reference:",
+  "- Core setup: import { createSmithers, Sequence, Parallel, Branch, Ralph } from \"smithers-orchestrator\" and define schemas in createSmithers({...}).",
+  "- Workflow skeleton: export default smithers((ctx) => (<Workflow name=\"...\">...</Workflow>)).",
+  "- Task contract: every <Task> must have a stable id and output wired as output={outputs.<schemaKey>}.",
+  "- Launch inputs: read user-provided run input via ctx.input.<field>; if optional, use nullish defaults (ctx.input.<field> ?? <default>).",
+  "- Cross-task references: use ctx.output(\"schemaKey\", { nodeId: \"task-id\" }) for required upstream output and ctx.outputMaybe(...) for optional flow.",
+  "- Stateful/table patterns: use ctx.latest(...)/ctx.latestArray(...) only when stateful table-driven workflows are intentionally required.",
+  "- Control flow primitives:",
+  "  - <Sequence>: strict ordered execution.",
+  "  - <Parallel>: independent concurrent branches.",
+  "  - <Branch if={condition} then={<TaskOrSubtree />} else={<TaskOrSubtree />} /> for explicit branching.",
+  "  - <Ralph until={condition} maxIterations={n}>...</Ralph> for bounded review/fix loops.",
+  "- Error handling primitives: retries, timeoutMs, skipIf, continueOnFail, explicit Branch-based recovery paths.",
+].join("\n")
+
+const smithersFeatureImplementationFlowExample = [
+  "Feature implementation flow example (adapt when relevant):",
+  "```tsx",
+  "const { Workflow, Task, smithers, outputs } = createSmithers({",
+  "  plan: z.object({ summary: z.string(), steps: z.array(z.string()) }),",
+  "  implement: z.object({ summary: z.string(), filesChanged: z.array(z.string()) }),",
+  "  validate: z.object({ passed: z.boolean(), notes: z.array(z.string()) }),",
+  "  review: z.object({ approved: z.boolean(), feedback: z.string().optional() }),",
+  "})",
+  "",
+  "export default smithers((ctx) => (",
+  "  <Workflow name=\"feature-flow\">",
+  "    <Sequence>",
+  "      <Task id=\"plan\" output={outputs.plan}>",
+  "        {{ summary: `Plan for ${ctx.input.feature}`, steps: [\"analyze\", \"implement\", \"test\"] }}",
+  "      </Task>",
+  "      <Task id=\"implement\" output={outputs.implement}>",
+  "        {{ summary: \"Implemented feature\", filesChanged: [\"src/feature.ts\"] }}",
+  "      </Task>",
+  "      <Task id=\"validate\" output={outputs.validate}>",
+  "        {{ passed: true, notes: [\"typecheck passed\", \"tests passed\"] }}",
+  "      </Task>",
+  "      <Branch",
+  "        if={!ctx.output(\"validate\", { nodeId: \"validate\" }).passed}",
+  "        then={<Task id=\"repair\" output={outputs.implement}>{{ summary: \"Repair\", filesChanged: [] }}</Task>}",
+  "      />",
+  "    </Sequence>",
+  "  </Workflow>",
+  "))",
+  "```",
+].join("\n")
+
+const smithersCliAgentModelGuide = [
+  "Model and agent selection guidance (explicit):",
+  "Choosing the right model for each task has a significant impact on workflow quality and cost.",
+  "",
+  "Recommended models:",
+  "- Codex (gpt-5.3-codex) — Implementation: implementing features, fixing bugs, running/interpreting tests, refactors, and fixing review issues.",
+  "- Codex reasoning effort: high by default; use xhigh for especially complex architectural/multi-file dependency-heavy changes.",
+  "- Claude Opus (claude-opus-4-6) — Planning and Review: codebase research, implementation planning, code review, report generation, orchestration logic/tool calling.",
+  "- Claude Sonnet (claude-sonnet-4-5-20250929) — Simple Tasks: lightweight tool calls, cheap/fast reviews, straightforward report aggregation.",
+  "",
+  "Summary table (task -> model):",
+  "- Implementing code -> Codex",
+  "- Reviewing code -> Claude Opus + Codex in parallel",
+  "- Research and planning -> Claude Opus",
+  "- Running tests / validation -> Codex",
+  "- Simple tool calls -> Claude Sonnet",
+  "- Report generation -> Claude Sonnet or Claude Opus (based on complexity)",
+  "- Ticket discovery -> Codex or Claude Opus",
+  "",
+  "CLI Agents vs AI SDK Agents:",
+  "- Prefer CLI agents (subscription-backed binaries) when you need native tool ecosystems (file editing, shell access, local project operations).",
+  "- AI SDK agents are appropriate when you explicitly need provider/API-level orchestration in application runtime code.",
+  "",
+  "CLI agent examples:",
+  "```ts",
+  "import { ClaudeCodeAgent, CodexAgent, KimiAgent } from \"smithers-orchestrator\"",
+  "",
+  "const claude = new ClaudeCodeAgent({",
+  "  model: \"claude-opus-4-6\",",
+  "  systemPrompt: SYSTEM_PROMPT,",
+  "  dangerouslySkipPermissions: true,",
+  "  timeoutMs: 30 * 60 * 1000,",
+  "})",
+  "",
+  "const codex = new CodexAgent({",
+  "  model: \"gpt-5.3-codex\",",
+  "  systemPrompt: SYSTEM_PROMPT,",
+  "  yolo: true,",
+  "  config: { model_reasoning_effort: \"high\" },",
+  "  timeoutMs: 30 * 60 * 1000,",
+  "})",
+  "",
+  "const kimi = new KimiAgent({",
+  "  model: \"kimi-latest\",",
+  "  systemPrompt: SYSTEM_PROMPT,",
+  "  thinking: true,",
+  "  timeoutMs: 30 * 60 * 1000,",
+  "})",
+  "```",
+  "",
+  "Dual-agent pattern recommendation:",
+  "- For high-signal review workflows, run Opus and Codex reviewers in parallel and merge findings in a dedicated summarize task.",
+].join("\n")
+
+function buildAvailableAgentCliDigest(params: {
+  selectedAgentId: string
+  availableAgentClis: AgentCli[]
+}) {
+  const availableLines =
+    params.availableAgentClis.length === 0
+      ? ["- none detected in PATH"]
+      : params.availableAgentClis.map(
+          (agent) => `- ${agent.id} | ${agent.name} | command: ${agent.command}`
+        )
+
+  return [
+    `Selected authoring CLI agent for this run: ${params.selectedAgentId}`,
+    "Installed CLI agents currently available on this machine:",
+    ...availableLines,
+    "When selecting or describing agents in workflow code/prompts, only reference this available set unless the user explicitly requests otherwise.",
+  ].join("\n")
+}
 
 const defaultTemplateById = new Map<string, string>(
   defaultWorkflowTemplates.map((template) => [template.id, template.source])
@@ -137,11 +286,13 @@ function normalizeAndValidateWorkflowSource(source: string) {
   return normalizedSource
 }
 
-function buildWorkflowGenerationPrompt(params: {
+export function buildWorkflowGenerationPrompt(params: {
   workflowName: string
   workflowId: string
   userPrompt: string
   workspacePath: string
+  selectedAgentId: string
+  availableAgentClis: AgentCli[]
 }) {
   return [
     "You are authoring a Smithers workflow for Mr. Burns inside a real workspace.",
@@ -161,6 +312,14 @@ function buildWorkflowGenerationPrompt(params: {
     "Always import createSmithers from smithers-orchestrator and z from zod.",
     "Always define output schemas and reference outputs with output={outputs.<schemaKey>}.",
     "Create any missing folders needed for the target file.",
+    buildAvailableAgentCliDigest({
+      selectedAgentId: params.selectedAgentId,
+      availableAgentClis: params.availableAgentClis,
+    }),
+    smithersGuideDigest,
+    smithersSyntaxReference,
+    smithersCliAgentModelGuide,
+    smithersFeatureImplementationFlowExample,
     "Use this scaffold shape and adapt IDs/schemas/prompts:",
     `\`\`\`tsx\n${workflowPromptScaffold}\n\`\`\``,
     "User request:",
@@ -168,12 +327,14 @@ function buildWorkflowGenerationPrompt(params: {
   ].join("\n\n")
 }
 
-function buildWorkflowEditPrompt(params: {
+export function buildWorkflowEditPrompt(params: {
   workflowName: string
   workflowId: string
   userPrompt: string
   workspacePath: string
   relativeFilePath: string
+  selectedAgentId: string
+  availableAgentClis: AgentCli[]
 }) {
   return [
     "You are editing an existing Smithers workflow for Mr. Burns inside a real workspace.",
@@ -193,6 +354,14 @@ function buildWorkflowEditPrompt(params: {
     "Do not use a bare global smithers symbol. Always define it from createSmithers(...).",
     "Always import createSmithers from smithers-orchestrator and z from zod.",
     "Always define output schemas and reference outputs with output={outputs.<schemaKey>}.",
+    buildAvailableAgentCliDigest({
+      selectedAgentId: params.selectedAgentId,
+      availableAgentClis: params.availableAgentClis,
+    }),
+    smithersGuideDigest,
+    smithersSyntaxReference,
+    smithersCliAgentModelGuide,
+    smithersFeatureImplementationFlowExample,
     "Use this scaffold shape when rewriting if needed:",
     `\`\`\`tsx\n${workflowPromptScaffold}\n\`\`\``,
     "User request:",
@@ -200,13 +369,15 @@ function buildWorkflowEditPrompt(params: {
   ].join("\n\n")
 }
 
-function buildWorkflowRepairPrompt(params: {
+export function buildWorkflowRepairPrompt(params: {
   workflowName: string
   workflowId: string
   userPrompt: string
   workspacePath: string
   relativeFilePath: string
   validationError: string
+  selectedAgentId: string
+  availableAgentClis: AgentCli[]
 }) {
   return [
     "You are repairing a Smithers workflow file after validation failed.",
@@ -221,6 +392,14 @@ function buildWorkflowRepairPrompt(params: {
     "The file must import createSmithers from smithers-orchestrator and z from zod.",
     "The file must define smithers via createSmithers(...) and default export smithers((ctx) => (...)).",
     "Every task output must use output={outputs.<schemaKey>}.",
+    buildAvailableAgentCliDigest({
+      selectedAgentId: params.selectedAgentId,
+      availableAgentClis: params.availableAgentClis,
+    }),
+    smithersGuideDigest,
+    smithersSyntaxReference,
+    smithersCliAgentModelGuide,
+    smithersFeatureImplementationFlowExample,
     "Validation error to fix:",
     params.validationError,
     "Original user request (preserve intent):",
@@ -307,15 +486,18 @@ function extractFirstTaskSegment(source: string) {
     return {
       entryTaskId: null,
       taskSegment: null,
+      taskEndIndex: null,
     }
   }
 
   const taskSegment = taskMatch[0]
   const idMatch = taskSegment.match(/\bid\s*=\s*["']([^"']+)["']/)
+  const taskEndIndex = (taskMatch.index ?? 0) + taskSegment.length
 
   return {
     entryTaskId: idMatch?.[1] ?? null,
     taskSegment,
+    taskEndIndex,
   }
 }
 
@@ -342,9 +524,9 @@ export function getWorkflowLaunchFields(
   workflowId: string
 ): WorkflowLaunchFieldsResponse {
   const workflow = getWorkflow(workspaceId, workflowId)
-  const { entryTaskId, taskSegment } = extractFirstTaskSegment(workflow.source)
+  const { entryTaskId, taskSegment, taskEndIndex } = extractFirstTaskSegment(workflow.source)
 
-  if (!taskSegment) {
+  if (!taskSegment || taskEndIndex === null) {
     return {
       workflowId,
       mode: "fallback",
@@ -354,7 +536,11 @@ export function getWorkflowLaunchFields(
     }
   }
 
-  const inputKeys = extractCtxInputKeys(taskSegment)
+  // Include pre-task callback setup plus the first task body so patterns like:
+  // const feature = ctx.input?.feature ?? ctx.input?.description
+  // are discovered even when the first task only interpolates `${feature}`.
+  const inferenceSegment = workflow.source.slice(0, taskEndIndex)
+  const inputKeys = extractCtxInputKeys(inferenceSegment)
   if (inputKeys.length === 0) {
     return {
       workflowId,
@@ -485,6 +671,7 @@ async function runWorkflowAuthoringWithRetries(params: {
   relativeFilePath: string
   filePath: string
   agentId: string
+  availableAgentClis: AgentCli[]
   initialPrompt: string
   userPrompt: string
   onProgress?: WorkflowAuthoringProgressHandler
@@ -561,6 +748,8 @@ async function runWorkflowAuthoringWithRetries(params: {
         workspacePath: params.workspacePath,
         relativeFilePath: params.relativeFilePath,
         validationError,
+        selectedAgentId: params.agentId,
+        availableAgentClis: params.availableAgentClis,
       })
     }
   }
@@ -609,6 +798,8 @@ export async function generateWorkflowFromPrompt(params: {
     throw new HttpError(404, `Workspace not found: ${params.workspaceId}`)
   }
 
+  const availableAgentClis = listInstalledAgentClis()
+
   const workflowId = slugify(params.name)
   if (!workflowId) {
     throw new HttpError(400, "Workflow name must contain letters or numbers")
@@ -632,6 +823,8 @@ export async function generateWorkflowFromPrompt(params: {
     workflowId,
     userPrompt: params.prompt,
     workspacePath: workspace.path,
+    selectedAgentId: params.agentId,
+    availableAgentClis,
   })
 
   const authoredWorkflow = await runWorkflowAuthoringWithRetries({
@@ -642,6 +835,7 @@ export async function generateWorkflowFromPrompt(params: {
     relativeFilePath,
     filePath,
     agentId: params.agentId,
+    availableAgentClis,
     initialPrompt: generationPrompt,
     userPrompt: params.prompt,
     onProgress: params.onProgress,
@@ -672,6 +866,8 @@ export async function editWorkflowFromPrompt(params: {
     throw new HttpError(404, `Workspace not found: ${params.workspaceId}`)
   }
 
+  const availableAgentClis = listInstalledAgentClis()
+
   const existingWorkflow = getWorkflow(params.workspaceId, params.workflowId)
   const filePath = getWorkflowFilePath(params.workspaceId, params.workflowId)
 
@@ -687,6 +883,8 @@ export async function editWorkflowFromPrompt(params: {
     userPrompt: params.prompt,
     workspacePath: workspace.path,
     relativeFilePath: existingWorkflow.relativePath,
+    selectedAgentId: params.agentId,
+    availableAgentClis,
   })
 
   const editedWorkflow = await runWorkflowAuthoringWithRetries({
@@ -697,6 +895,7 @@ export async function editWorkflowFromPrompt(params: {
     relativeFilePath: existingWorkflow.relativePath,
     filePath,
     agentId: params.agentId,
+    availableAgentClis,
     initialPrompt: editPrompt,
     userPrompt: params.prompt,
     onProgress: params.onProgress,

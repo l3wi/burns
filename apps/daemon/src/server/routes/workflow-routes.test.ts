@@ -73,6 +73,28 @@ export default smithers((ctx) => (
 ))
 `
 
+const inferableFromPreludeSource = `import { createSmithers, Sequence } from "smithers-orchestrator"
+import { z } from "zod"
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  plan: z.object({ summary: z.string() }),
+})
+
+export default smithers((ctx) => {
+  const feature = ctx.input?.feature ?? ctx.input?.description ?? "fallback"
+
+  return (
+    <Workflow name="implement-feature">
+      <Sequence>
+        <Task id="plan" output={outputs.plan}>
+          {\`Plan this feature: \${feature}\`}
+        </Task>
+      </Sequence>
+    </Workflow>
+  )
+})
+`
+
 describe("workflow routes", () => {
   it("saves valid workflow source", async () => {
     const app = createApp()
@@ -203,6 +225,38 @@ describe("workflow routes", () => {
       entryTaskId: "plan",
       fields: [],
       message: "Unable to determine inputs automatically.",
+    })
+  })
+
+  it("infers launch fields when ctx.input is referenced before first task", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+
+    const saveResponse = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/workflows/prelude-flow`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: inferableFromPreludeSource }),
+      })
+    )
+
+    expect(saveResponse.status).toBe(200)
+
+    const response = await app.fetch(
+      new Request(
+        `http://localhost:7332/api/workspaces/${workspaceId}/workflows/prelude-flow/launch-fields`
+      )
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      workflowId: "prelude-flow",
+      mode: "inferred",
+      entryTaskId: "plan",
+      fields: [
+        { key: "feature", label: "Feature", type: "string" },
+        { key: "description", label: "Description", type: "string" },
+      ],
     })
   })
 })
