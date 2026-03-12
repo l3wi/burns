@@ -7,7 +7,7 @@ const config = {
   },
   build: {
     bun: {
-      entrypoint: "./src/main.ts",
+      entrypoint: "./src/index.ts",
     },
     mac: {
       icons: "./icon.iconset",

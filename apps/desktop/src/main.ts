@@ -6,10 +6,29 @@ import {
   resolveRuntimeConfig,
 } from "./runtime-config";
 
-function resolveDesktopIndexUrl(): string {
+async function resolveDesktopIndexUrl(): Promise<string> {
   const externalWebUrl = process.env.BURNS_DESKTOP_WEB_URL?.trim();
   if (externalWebUrl) {
-    return externalWebUrl;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const response = await fetch(externalWebUrl, {
+        method: "GET",
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      return externalWebUrl;
+    } catch (error) {
+      console.error(
+        `[desktop] Could not reach BURNS_DESKTOP_WEB_URL (${externalWebUrl}). Falling back to packaged web bundle.`,
+        error,
+      );
+    }
   }
 
   const indexPath = join(import.meta.dir, "..", "views", "index.html");
@@ -27,7 +46,7 @@ async function injectRuntimeConfig(window: BrowserWindow): Promise<void> {
 
 async function startDesktopShell(): Promise<void> {
   console.log("[desktop] Starting desktop shell...");
-  const desktopIndexUrl = resolveDesktopIndexUrl();
+  const desktopIndexUrl = await resolveDesktopIndexUrl();
   console.log("[desktop] Desktop index URL:", desktopIndexUrl);
 
   const window = new BrowserWindow({

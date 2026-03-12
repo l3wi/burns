@@ -4,7 +4,7 @@ type ManagedProcess = {
 };
 
 const repoRoot = process.cwd();
-const desktopWebUrl = process.env.BURNS_DESKTOP_WEB_URL?.trim() || "http://127.0.0.1:5173";
+const desktopWebUrl = process.env.BURNS_DESKTOP_WEB_URL?.trim() || "http://localhost:5173";
 const apiBaseUrl = process.env.BURNS_API_BASE_URL?.trim() || "http://127.0.0.1:7332";
 const sharedEnv = {
   ...process.env,
