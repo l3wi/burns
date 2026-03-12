@@ -4,14 +4,18 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "bunx electrobun dev",
-    "build": "bunx electrobun build --env=stable",
-    "build:canary": "bunx electrobun build --env=canary",
+    "predev": "bun ./scripts/ensure-electrobun-local.ts",
+    "dev": "electrobun dev",
+    "prebuild": "bun ./scripts/ensure-electrobun-local.ts",
+    "build": "electrobun build --env=stable",
+    "prebuild:canary": "bun ./scripts/ensure-electrobun-local.ts",
+    "build:canary": "electrobun build --env=canary",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
   "devDependencies": {
     "bun-types": "latest",
+    "electrobun": "1.15.1",
     "typescript": "~5.9.3"
   }
 }
