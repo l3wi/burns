@@ -8,7 +8,6 @@ async function shutdown(signal: "SIGINT" | "SIGTERM") {
   }
 
   stopping = true
-
   try {
     await stopDaemon({ signal })
     process.exit(0)

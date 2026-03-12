@@ -6,6 +6,8 @@
 - [Codebase Layout](./codebase-layout.md)
 - [Daemon API Reference](./daemon-api-reference.md)
 - [Workspace + Runtime Handoff (Next Agent)](./next-agent-workspace-gaps.md)
+- [ADR-0001: Desktop Daemon Bootstrap Mode](./decisions/ADR-0001-daemon-bootstrap-mode.md)
+- [ADR-0002: Runtime API URL Contract](./decisions/ADR-0002-runtime-api-url-contract.md)
 
 ## ElectroBun + CLI rollout
 
@@ -17,4 +19,6 @@
 ## Release notes and changelog
 
 - Use `scripts/release/create-release-notes.sh` to generate a release notes draft for canary/stable.
+- Use `scripts/release/verify-artifact-integrity.sh` to produce checksum manifests for collected artifacts.
+- Use `bun run smoke:release` to run desktop + CLI runtime smoke checks locally.
 - Promote release notes highlights into the root `CHANGELOG.md` before stable publication.

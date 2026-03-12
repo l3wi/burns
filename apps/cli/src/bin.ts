@@ -1,10 +1,48 @@
 #!/usr/bin/env bun
 
-import { startDaemonFromEntrypoint } from "./daemon"
+import { startDaemonFromLifecycle } from "./daemon"
 import { openInBrowser } from "./open-browser"
 import { parseCliArgs } from "./args"
 import { renderUsage } from "./usage"
-import { getMissingWebBuildGuidance, hasBuiltWebApp, startWebServer } from "./web"
+import {
+  DEFAULT_WEB_HOST,
+  DEFAULT_WEB_PORT,
+  getMissingWebBuildGuidance,
+  getWebUrl,
+  hasBuiltWebApp,
+  startWebServer,
+} from "./web"
+
+async function waitForShutdown(onShutdown: () => Promise<void> | void) {
+  return await new Promise<number>((resolve) => {
+    let stopping = false
+
+    const handleSignal = (signal: "SIGINT" | "SIGTERM") => {
+      if (stopping) {
+        return
+      }
+
+      stopping = true
+      process.off("SIGINT", handleSigInt)
+      process.off("SIGTERM", handleSigTerm)
+
+      Promise.resolve(onShutdown())
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error)
+          console.error(`Shutdown failed for ${signal}: ${message}`)
+        })
+        .finally(() => {
+          resolve(0)
+        })
+    }
+
+    const handleSigInt = () => handleSignal("SIGINT")
+    const handleSigTerm = () => handleSignal("SIGTERM")
+
+    process.on("SIGINT", handleSigInt)
+    process.on("SIGTERM", handleSigTerm)
+  })
+}
 
 async function run() {
   const parsed = parseCliArgs(process.argv.slice(2))
@@ -24,26 +62,44 @@ async function run() {
   }
 
   if (command.kind === "daemon") {
-    const { apiUrl } = await startDaemonFromEntrypoint()
+    const { apiUrl, stopDaemon } = await startDaemonFromLifecycle()
     console.log(`Daemon listening at ${apiUrl}`)
-    return 0
+    return waitForShutdown(stopDaemon)
   }
 
   if (command.kind === "start") {
-    const { apiUrl } = await startDaemonFromEntrypoint()
+    const { apiUrl, stopDaemon } = await startDaemonFromLifecycle()
     console.log(`Daemon listening at ${apiUrl}`)
 
+    let stopWebServer: (() => void) | null = null
+    let servedWebUrl = getWebUrl(DEFAULT_WEB_HOST, DEFAULT_WEB_PORT)
+
+    if (await hasBuiltWebApp()) {
+      const runningWebServer = startWebServer({
+        host: DEFAULT_WEB_HOST,
+        port: DEFAULT_WEB_PORT,
+      })
+      servedWebUrl = runningWebServer.url
+      stopWebServer = () => runningWebServer.stop()
+      console.log(`Web UI serving at ${servedWebUrl}`)
+    } else {
+      console.warn(getMissingWebBuildGuidance())
+    }
+
     if (command.openWeb) {
-      const openResult = await openInBrowser(command.webUrl)
+      const openResult = await openInBrowser(command.webUrl || servedWebUrl)
       if (!openResult.ok) {
         console.error(`Failed to open browser: ${openResult.error}`)
-        console.error(`Open this URL manually: ${command.webUrl}`)
+        console.error(`Open this URL manually: ${command.webUrl || servedWebUrl}`)
       } else {
-        console.log(`Opened web URL: ${command.webUrl}`)
+        console.log(`Opened web URL: ${command.webUrl || servedWebUrl}`)
       }
     }
 
-    return 0
+    return waitForShutdown(async () => {
+      stopWebServer?.()
+      await stopDaemon()
+    })
   }
 
   if (!(await hasBuiltWebApp())) {
@@ -66,16 +122,8 @@ async function run() {
     }
   }
 
-  const stopServer = () => {
+  return waitForShutdown(() => {
     runningWebServer.stop()
-  }
-
-  process.on("SIGINT", stopServer)
-  process.on("SIGTERM", stopServer)
-
-  return await new Promise<number>((resolve) => {
-    process.once("SIGINT", () => resolve(0))
-    process.once("SIGTERM", () => resolve(0))
   })
 }
 

@@ -8,6 +8,10 @@ export function resolveDaemonEntrypointPath() {
   return path.join(resolveWorkspaceRoot(), "apps/daemon/src/main.ts")
 }
 
+export function resolveDaemonLifecyclePath() {
+  return path.join(resolveWorkspaceRoot(), "apps/daemon/src/bootstrap/daemon-lifecycle.ts")
+}
+
 export function resolveWebDistPath() {
-  return path.join(resolveWorkspaceRoot(), "apps/web/dist")
+  return path.join(resolveWorkspaceRoot(), "dist/web")
 }

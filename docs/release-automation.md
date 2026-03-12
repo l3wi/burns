@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-12
 
-This document defines the canary/stable release scaffold for ElectroBun desktop + CLI rollout.
+This document defines the canary/stable release automation for ElectroBun desktop + CLI rollout.
 
 ## Workflows
 
@@ -16,9 +16,12 @@ Both workflows:
   - `darwin/arm64` (`macos-14`)
   - `windows/x64` (`windows-latest`)
 - Install dependencies with Bun.
-- Run optional desktop/CLI build steps through `scripts/release/run-build-step.sh`.
+- Run runtime smoke checks (`bun run smoke:release`).
+- Run desktop/CLI build steps through `scripts/release/run-build-step.sh`.
 - Collect artifacts through `scripts/release/collect-artifacts.sh`.
+- Collect in strict mode by default (missing artifact patterns fail the job).
 - Validate naming through `scripts/release/validate-artifact-contract.sh`.
+- Validate artifact integrity and emit checksums via `scripts/release/verify-artifact-integrity.sh`.
 - Upload matrix artifacts through `actions/upload-artifact`.
 
 ## Artifact naming contract
@@ -72,10 +75,7 @@ bash scripts/release/collect-artifacts.sh \
   --output-dir release-artifacts
 ```
 
-If no files match a configured pattern:
-
-- default: write a contract-compliant placeholder text artifact
-- `--strict`: fail the step
+Release workflows run this with `--strict`, so missing desktop/CLI artifacts fail immediately.
 
 ### `scripts/release/validate-artifact-contract.sh`
 
@@ -84,6 +84,46 @@ Purpose: enforce naming compliance for generated files in an artifact directory.
 ### `scripts/release/create-release-notes.sh`
 
 Purpose: generate a release notes template for canary/stable updates and changelog curation.
+
+### `scripts/release/build-cli-artifact.sh`
+
+Purpose: build CLI tarball artifacts with `bun pm pack` into `dist/cli`.
+
+Example:
+
+```bash
+bash scripts/release/build-cli-artifact.sh \
+  --channel canary \
+  --version 0.0.0-canary.42+abc12345
+```
+
+### `scripts/release/build-desktop-artifact.sh`
+
+Purpose: build ElectroBun desktop output and archive `dist/desktop/{build,artifacts}` into `dist/desktop`.
+
+Example:
+
+```bash
+bash scripts/release/build-desktop-artifact.sh \
+  --channel canary \
+  --version 0.0.0-canary.42+abc12345
+```
+
+### `scripts/release/verify-artifact-integrity.sh`
+
+Purpose: check that collected artifacts are non-empty and write `SHA256SUMS.txt`. Use `--reject-placeholders` to fail placeholder artifacts (enabled by both release workflows).
+
+Example:
+
+```bash
+bash scripts/release/verify-artifact-integrity.sh --dir release-artifacts --reject-placeholders
+```
+
+### Runtime smoke scripts
+
+- `bun run smoke:desktop-runtime`: validates daemon lifecycle + desktop runtime config contract.
+- `bun run smoke:cli-runtime`: validates CLI start path by checking daemon health and web serving.
+- `bun run smoke:release`: runs both smoke checks; used by release workflows.
 
 ## Repository variables
 
@@ -97,5 +137,3 @@ Configure these repository-level GitHub Actions variables when desktop/CLI comma
 - `BURNS_CLI_STABLE_BUILD_COMMAND` (optional override)
 - `BURNS_DESKTOP_ARTIFACT_PATTERN`
 - `BURNS_CLI_ARTIFACT_PATTERN`
-
-The scaffold intentionally avoids hard-coding package commands so desktop/CLI implementation can land independently.

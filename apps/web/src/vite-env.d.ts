@@ -3,6 +3,7 @@
 
 type BurnsRuntimeConfig = {
   burnsApiUrl?: unknown
+  runtimeMode?: "dev" | "desktop" | "cli"
 }
 
 interface Window {

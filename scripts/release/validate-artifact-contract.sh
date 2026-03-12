@@ -46,7 +46,7 @@ invalid_count=0
 
 while IFS= read -r file_name; do
   case "$file_name" in
-    artifact-manifest.txt)
+    artifact-manifest.txt|SHA256SUMS.txt)
       continue
       ;;
   esac

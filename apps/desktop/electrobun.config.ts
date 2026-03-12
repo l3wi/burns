@@ -1,26 +1,42 @@
-const config = {
+import type { ElectrobunConfig } from "electrobun"
+
+export default {
   app: {
     name: "Mr. Burns",
-    identifier: "com.mrburns.desktop",
+    identifier: "ai.mrburns.desktop",
     version: "0.1.0",
-    urlSchemes: ["mrburns"],
+    description: "Mr. Burns desktop shell",
   },
   build: {
     bun: {
       entrypoint: "./src/index.ts",
     },
-    mac: {
-      icons: "./icon.iconset",
-    },
+    buildFolder: "../../dist/desktop/build",
+    artifactFolder: "../../dist/desktop/artifacts",
     copy: {
-      "../web/dist": "views",
-      "../web/public": "views/public",
+      "../../dist/web": "views/mainview",
     },
+    mac: {
+      bundleCEF: false,
+      defaultRenderer: "native",
+      icons: "../../assets/icons/macos.iconset",
+    },
+    win: {
+      bundleCEF: false,
+      defaultRenderer: "native",
+      icon: "../../assets/icons/app-icon.png",
+    },
+    linux: {
+      bundleCEF: false,
+      defaultRenderer: "native",
+      icon: "../../assets/icons/app-icon.png",
+    },
+  },
+  runtime: {
+    exitOnLastWindowClosed: true,
   },
   scripts: {
     preBuild: "./scripts/prebuild-web.ts",
     postBuild: "./scripts/copy-web-assets.ts",
   },
-};
-
-export default config;
+} satisfies ElectrobunConfig

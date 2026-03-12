@@ -5,8 +5,8 @@ Last updated: 2026-03-12
 ## Preflight
 
 - [ ] Confirm target branch/tag and release channel (`canary` or `stable`).
-- [ ] Confirm desktop/CLI build command variables are configured.
 - [ ] Confirm desktop/CLI artifact patterns match real output paths.
+- [ ] Confirm smoke scripts pass locally (`bun run smoke:release`) when validating release changes.
 - [ ] Confirm `CHANGELOG.md` has pending entries for this release.
 - [ ] Confirm runbook owner and rollback owner are assigned.
 
@@ -16,7 +16,8 @@ Last updated: 2026-03-12
 - [ ] Confirm all OS matrix jobs complete.
 - [ ] Review `artifact-manifest.txt` in each uploaded bundle.
 - [ ] Confirm artifact naming contract passes validation.
-- [ ] Confirm placeholder artifacts are not present for stable releases.
+- [ ] Confirm `SHA256SUMS.txt` is present and includes all artifacts.
+- [ ] Confirm no placeholder artifacts are present.
 
 ## Validation
 

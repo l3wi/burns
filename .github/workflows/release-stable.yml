@@ -13,7 +13,7 @@ on:
       strict_artifacts:
         description: 'Fail if configured artifact patterns do not match files.'
         required: false
-        default: false
+        default: true
         type: boolean
 
 permissions:
@@ -24,8 +24,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DESKTOP_BUILD_COMMAND: ${{ vars.BURNS_DESKTOP_STABLE_BUILD_COMMAND || vars.BURNS_DESKTOP_BUILD_COMMAND || '' }}
-  CLI_BUILD_COMMAND: ${{ vars.BURNS_CLI_STABLE_BUILD_COMMAND || vars.BURNS_CLI_BUILD_COMMAND || '' }}
+  DESKTOP_BUILD_COMMAND: ${{ vars.BURNS_DESKTOP_STABLE_BUILD_COMMAND || vars.BURNS_DESKTOP_BUILD_COMMAND || 'bash scripts/release/build-desktop-artifact.sh --channel stable --version ${RELEASE_VERSION} --output-dir dist/desktop' }}
+  CLI_BUILD_COMMAND: ${{ vars.BURNS_CLI_STABLE_BUILD_COMMAND || vars.BURNS_CLI_BUILD_COMMAND || 'bash scripts/release/build-cli-artifact.sh --channel stable --version ${RELEASE_VERSION} --output-dir dist/cli' }}
   DESKTOP_ARTIFACT_PATTERN: ${{ vars.BURNS_DESKTOP_ARTIFACT_PATTERN || 'dist/desktop/*' }}
   CLI_ARTIFACT_PATTERN: ${{ vars.BURNS_CLI_ARTIFACT_PATTERN || 'dist/cli/*' }}
 
@@ -81,17 +81,20 @@ jobs:
           echo "CHANNEL=stable" >> "$GITHUB_ENV"
           echo "RELEASE_VERSION=${RELEASE_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Build desktop package (optional scaffold)
+      - name: Build desktop package
         run: |
           bash scripts/release/run-build-step.sh \
             --label "desktop build" \
             --command "${DESKTOP_BUILD_COMMAND}"
 
-      - name: Build CLI package (optional scaffold)
+      - name: Build CLI package
         run: |
           bash scripts/release/run-build-step.sh \
             --label "cli build" \
             --command "${CLI_BUILD_COMMAND}"
+
+      - name: Runtime smoke checks
+        run: bun run smoke:release
 
       - name: Collect artifacts
         run: |
@@ -105,7 +108,7 @@ jobs:
             --output-dir "release-artifacts"
           )
 
-          if [[ "${{ github.event.inputs.strict_artifacts || 'false' }}" == "true" ]]; then
+          if [[ "${{ github.event.inputs.strict_artifacts || 'true' }}" == "true" ]]; then
             collect_args+=(--strict)
           fi
 
@@ -113,6 +116,12 @@ jobs:
 
       - name: Validate artifact naming contract
         run: bash scripts/release/validate-artifact-contract.sh --dir "release-artifacts"
+
+      - name: Verify artifact integrity
+        run: |
+          bash scripts/release/verify-artifact-integrity.sh \
+            --dir "release-artifacts" \
+            --reject-placeholders
 
       - name: Upload stable artifacts
         uses: actions/upload-artifact@v4

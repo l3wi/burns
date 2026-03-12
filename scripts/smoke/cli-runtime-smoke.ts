@@ -1,56 +1,103 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
-import path from "node:path"
-import { setTimeout as sleep } from "node:timers/promises"
+import net from "node:net"
 
-const REPO_ROOT = path.resolve(import.meta.dir, "../..")
-const DAEMON_HEALTH_URL = process.env.BURNS_SMOKE_DAEMON_HEALTH_URL ?? "http://localhost:7332/api/health"
-const WEB_URL = process.env.BURNS_SMOKE_WEB_URL ?? "http://127.0.0.1:4173"
-const START_TIMEOUT_MS = Number(process.env.BURNS_SMOKE_TIMEOUT_MS ?? "90000")
+const STARTUP_TIMEOUT_MS = 45_000
+const HEALTH_TIMEOUT_MS = 15_000
+const SHUTDOWN_TIMEOUT_MS = 10_000
+const HEALTH_PATH = "/api/health"
+const DEFAULT_DAEMON_PORT = 7332
+const SKIP_IF_BUSY_ENV = "BURNS_SMOKE_CLI_SKIP_IF_DAEMON_PORT_BUSY"
 
-type CommandResult = {
-  stdout: string
-  stderr: string
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function runCommand(command: string, args: string[], cwd: string): Promise<CommandResult> {
-  return await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
-    })
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | null = null
 
-    let stdout = ""
-    let stderr = ""
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(message))
+      }, timeoutMs)
+    }),
+  ]).finally(() => {
+    if (timer) {
+      clearTimeout(timer)
+    }
+  })
+}
 
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8")
-    })
+function collectProcessOutput(process: ChildProcessWithoutNullStreams) {
+  const lines: string[] = []
 
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8")
-    })
-
-    child.on("error", (error) => {
-      reject(error)
-    })
-
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr })
-        return
+  const append = (chunk: Buffer) => {
+    const text = chunk.toString()
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim()
+      if (!line) {
+        continue
       }
+      lines.push(line)
+      console.log(`[smoke:cli] ${line}`)
+    }
+  }
 
-      reject(
-        new Error(
-          `Command failed (${command} ${args.join(" ")}) with exit code ${String(code)}\n${stderr || stdout}`
-        )
-      )
+  process.stdout.on("data", append)
+  process.stderr.on("data", append)
+
+  return {
+    getLines() {
+      return [...lines]
+    },
+    dump() {
+      return lines.join("\n")
+    },
+  }
+}
+
+function readUrlFromLogs(lines: string[], prefix: string) {
+  const entry = lines.find((line) => line.startsWith(prefix))
+  if (!entry) {
+    return null
+  }
+
+  return entry.slice(prefix.length).trim()
+}
+
+async function isPortBusy(port: number) {
+  return await new Promise<boolean>((resolve) => {
+    const socket = net.connect({ host: "127.0.0.1", port })
+    socket.once("connect", () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.once("error", () => {
+      resolve(false)
     })
   })
 }
 
-async function isUrlReady(url: string) {
+async function waitForStartupUrls(logs: ReturnType<typeof collectProcessOutput>) {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < STARTUP_TIMEOUT_MS) {
+    const lines = logs.getLines()
+    const daemonUrl = readUrlFromLogs(lines, "Daemon listening at")
+    const webUrl = readUrlFromLogs(lines, "Web UI serving at")
+
+    if (daemonUrl && webUrl) {
+      return { daemonUrl, webUrl }
+    }
+
+    await delay(250)
+  }
+
+  throw new Error(`Timed out waiting for startup URLs. Logs:\n${logs.dump()}`)
+}
+
+async function isHealthy(url: string) {
   try {
     const response = await fetch(url)
     return response.ok
@@ -59,74 +106,96 @@ async function isUrlReady(url: string) {
   }
 }
 
-async function stopProcess(child: ChildProcessWithoutNullStreams) {
-  if (child.exitCode !== null) {
+async function waitForHttpOk(url: string, timeoutMs: number) {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isHealthy(url)) {
+      return
+    }
+    await delay(250)
+  }
+
+  throw new Error(`Timed out waiting for healthy URL: ${url}`)
+}
+
+async function shutdown(process: ChildProcessWithoutNullStreams, logs: ReturnType<typeof collectProcessOutput>) {
+  if (process.exitCode !== null) {
+    if (process.exitCode !== 0) {
+      throw new Error(`CLI process exited with code ${process.exitCode}. Logs:\n${logs.dump()}`)
+    }
     return
   }
 
-  child.kill("SIGTERM")
+  process.kill("SIGTERM")
 
-  const deadline = Date.now() + 10_000
-  while (child.exitCode === null && Date.now() < deadline) {
-    await sleep(100)
+  const exitCode = await withTimeout(
+    new Promise<number>((resolve, reject) => {
+      process.once("error", reject)
+      process.once("exit", (code) => resolve(code ?? 0))
+    }),
+    SHUTDOWN_TIMEOUT_MS,
+    "Timed out waiting for CLI shutdown"
+  )
+
+  if (exitCode !== 0) {
+    throw new Error(`CLI process exited with code ${exitCode}. Logs:\n${logs.dump()}`)
   }
+}
 
-  if (child.exitCode === null) {
-    child.kill("SIGKILL")
+async function ensureWebBuild() {
+  console.log("[smoke:cli] Building web assets for smoke run")
+  const build = Bun.spawn(["bun", "run", "build:web"], {
+    cwd: process.cwd(),
+    stderr: "inherit",
+    stdout: "inherit",
+  })
+
+  const exitCode = await build.exited
+  if (exitCode !== 0) {
+    throw new Error(`bun run build:web failed with code ${exitCode}`)
   }
 }
 
 async function main() {
-  console.log("Building web assets for CLI smoke...")
-  await runCommand(process.execPath, ["run", "build:web"], REPO_ROOT)
-
-  const child = spawn(process.execPath, ["run", "apps/cli/src/bin.ts", "start"], {
-    cwd: REPO_ROOT,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: process.env,
-  })
-
-  let combinedLogs = ""
-  const appendLogs = (chunk: Buffer) => {
-    combinedLogs += chunk.toString("utf8")
-    if (combinedLogs.length > 8_000) {
-      combinedLogs = combinedLogs.slice(-8_000)
-    }
-  }
-
-  child.stdout.on("data", appendLogs)
-  child.stderr.on("data", appendLogs)
-
-  try {
-    const deadline = Date.now() + START_TIMEOUT_MS
-    while (Date.now() < deadline) {
-      if (child.exitCode !== null) {
-        throw new Error(`CLI process exited early with code ${String(child.exitCode)}\n${combinedLogs}`)
-      }
-
-      const [daemonReady, webReady] = await Promise.all([
-        isUrlReady(DAEMON_HEALTH_URL),
-        isUrlReady(WEB_URL),
-      ])
-
-      if (daemonReady && webReady) {
-        console.log(`CLI runtime smoke passed (daemon: ${DAEMON_HEALTH_URL}, web: ${WEB_URL})`)
-        return
-      }
-
-      await sleep(500)
+  if (await isPortBusy(DEFAULT_DAEMON_PORT)) {
+    const message = `Port ${DEFAULT_DAEMON_PORT} is already in use.`
+    if (process.env[SKIP_IF_BUSY_ENV] === "1") {
+      console.log(`[smoke:cli] ${message} Skipping smoke run because ${SKIP_IF_BUSY_ENV}=1.`)
+      return
     }
 
     throw new Error(
-      `Timed out waiting for CLI runtime endpoints\n- daemon: ${DAEMON_HEALTH_URL}\n- web: ${WEB_URL}\n${combinedLogs}`
+      `${message} Stop the existing daemon or rerun with ${SKIP_IF_BUSY_ENV}=1 to skip this local check.`
     )
+  }
+
+  await ensureWebBuild()
+
+  const processHandle = spawn("bun", ["run", "apps/cli/src/bin.ts", "start"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      BURNS_SMITHERS_MANAGED_MODE: "0",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  const logs = collectProcessOutput(processHandle)
+
+  try {
+    const { daemonUrl, webUrl } = await waitForStartupUrls(logs)
+    await waitForHttpOk(`${daemonUrl}${HEALTH_PATH}`, HEALTH_TIMEOUT_MS)
+    await waitForHttpOk(webUrl, HEALTH_TIMEOUT_MS)
+    console.log(`[smoke:cli] Daemon healthy at ${daemonUrl}${HEALTH_PATH}`)
+    console.log(`[smoke:cli] Web healthy at ${webUrl}`)
   } finally {
-    await stopProcess(child)
+    await shutdown(processHandle, logs)
   }
 }
 
 main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
-  console.error(`CLI runtime smoke failed: ${message}`)
+  console.error(`[smoke:cli] ${message}`)
   process.exitCode = 1
 })

@@ -1,7 +1,10 @@
 import { BurnsClient } from "@mr-burns/client"
 import { resolveBurnsApiUrlFromBrowserRuntime } from "@/lib/api/resolve-burns-api-url"
 
-export const BURNS_API_URL = resolveBurnsApiUrlFromBrowserRuntime()
+const resolvedApiUrl = resolveBurnsApiUrlFromBrowserRuntime()
+
+export const BURNS_API_URL = resolvedApiUrl.apiUrl
+export const BURNS_API_URL_SOURCE = resolvedApiUrl.source
 
 export const burnsClient = new BurnsClient(BURNS_API_URL)
 

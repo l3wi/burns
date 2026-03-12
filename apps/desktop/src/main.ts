@@ -1,85 +1,161 @@
-import { BrowserWindow } from "electrobun/bun";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import Electrobun, { BrowserWindow, Utils } from "electrobun/bun"
+import { appendFileSync } from "node:fs"
+
+import {
+  resolveDesktopDaemonRuntime,
+  type DesktopDaemonRuntimeHandle,
+} from "./daemon-runtime"
+import { resolveDesktopSourceUrl } from "./desktop-source"
 import {
   buildRuntimeConfigInitScript,
   resolveRuntimeConfig,
-} from "./runtime-config";
+} from "./runtime-config"
 
-async function resolveDesktopIndexUrl(): Promise<string> {
-  const externalWebUrl = process.env.BURNS_DESKTOP_WEB_URL?.trim();
-  if (externalWebUrl) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      const response = await fetch(externalWebUrl, {
-        method: "GET",
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+type BeforeQuitEvent = {
+  response?: {
+    allow: boolean
+  }
+}
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+let daemonRuntime: DesktopDaemonRuntimeHandle | null = null
+let daemonStopPromise: Promise<void> | null = null
+let shouldQuitAfterCleanup = false
+const debugLogEnabled = process.env.BURNS_DESKTOP_DEBUG_LOG === "1"
+const debugLogPath = process.env.BURNS_DESKTOP_DEBUG_LOG_PATH ?? "/tmp/mr-burns-desktop-debug.log"
 
-      return externalWebUrl;
-    } catch (error) {
-      console.error(
-        `[desktop] Could not reach BURNS_DESKTOP_WEB_URL (${externalWebUrl}). Falling back to packaged web bundle.`,
-        error,
-      );
-    }
+function debugLog(message: string) {
+  if (!debugLogEnabled) {
+    return
   }
 
-  const indexPath = join(import.meta.dir, "..", "views", "index.html");
-  return pathToFileURL(indexPath).toString();
+  const timestamp = new Date().toISOString()
+  appendFileSync(debugLogPath, `${timestamp} ${message}\n`)
 }
 
-function escapeScriptString(value: string): string {
-  return JSON.stringify(value);
+async function stopDaemonRuntime() {
+  debugLog("stopDaemonRuntime: begin")
+  if (daemonStopPromise) {
+    debugLog("stopDaemonRuntime: reusing pending promise")
+    return daemonStopPromise
+  }
+
+  daemonStopPromise = (async () => {
+    if (!daemonRuntime) {
+      debugLog("stopDaemonRuntime: no runtime to stop")
+      return
+    }
+
+    try {
+      debugLog("stopDaemonRuntime: calling daemonRuntime.stop()")
+      await daemonRuntime.stop()
+    } finally {
+      debugLog("stopDaemonRuntime: runtime cleared")
+      daemonRuntime = null
+    }
+  })().finally(() => {
+    debugLog("stopDaemonRuntime: promise cleared")
+    daemonStopPromise = null
+  })
+
+  return daemonStopPromise
 }
 
-async function injectRuntimeConfig(window: BrowserWindow): Promise<void> {
-  const script = buildRuntimeConfigInitScript(resolveRuntimeConfig());
-  window.webview.executeJavascript(script);
+function injectRuntimeConfig(window: BrowserWindow, daemonApiUrl: string) {
+  debugLog(`injectRuntimeConfig: daemonApiUrl=${daemonApiUrl}`)
+  const runtimeConfig = resolveRuntimeConfig({ daemonApiUrl })
+  const script = buildRuntimeConfigInitScript(runtimeConfig)
+  window.webview.executeJavascript(script)
 }
 
-async function startDesktopShell(): Promise<void> {
-  console.log("[desktop] Starting desktop shell...");
-  const desktopIndexUrl = await resolveDesktopIndexUrl();
-  console.log("[desktop] Desktop index URL:", desktopIndexUrl);
+function handleBeforeQuit(event: unknown) {
+  debugLog("handleBeforeQuit: event received")
+  if (shouldQuitAfterCleanup || !daemonRuntime) {
+    debugLog("handleBeforeQuit: skipped")
+    return
+  }
 
-  const window = new BrowserWindow({
+  const beforeQuitEvent = event as BeforeQuitEvent
+  beforeQuitEvent.response = { allow: false }
+  shouldQuitAfterCleanup = true
+
+  void stopDaemonRuntime().finally(() => {
+    debugLog("handleBeforeQuit: cleanup complete, quitting")
+    Utils.quit()
+  })
+}
+
+async function startDesktopShell() {
+  debugLog("startDesktopShell: begin")
+  daemonRuntime = await resolveDesktopDaemonRuntime()
+  debugLog(`startDesktopShell: daemon resolved source=${daemonRuntime.source} url=${daemonRuntime.url}`)
+  const sourceUrl = await resolveDesktopSourceUrl()
+  debugLog(`startDesktopShell: sourceUrl=${sourceUrl}`)
+
+  const mainWindow = new BrowserWindow({
     title: "Mr. Burns",
+    url: sourceUrl,
+    renderer: "native",
     frame: {
-      x: 80,
-      y: 80,
+      x: 160,
+      y: 90,
       width: 1360,
       height: 900,
     },
-    url: desktopIndexUrl,
-  });
-  console.log("[desktop] BrowserWindow created");
+  })
+  debugLog(`startDesktopShell: window created id=${mainWindow.id}`)
 
-  window.webview.on("dom-ready", async () => {
-    console.log("[desktop] Webview dom-ready");
-    await injectRuntimeConfig(window);
-  });
+  // Force a visible, focused frame in dev/runtime in case previous window state
+  // or multi-display coordinates place it off-screen.
+  mainWindow.setFrame(160, 90, 1360, 900)
+  debugLog("startDesktopShell: setFrame(160, 90, 1360, 900)")
+  mainWindow.show()
+  debugLog("startDesktopShell: show()")
+  mainWindow.focus()
+  debugLog("startDesktopShell: focus()")
 
-  window.webview.on("did-navigate", (event: unknown) => {
-    const url = (event as { data?: { detail?: string } } | undefined)?.data?.detail;
-    if (typeof url === "string" && url.startsWith("mrburns://")) {
-      const script = `window.dispatchEvent(new CustomEvent("burns:deep-link", { detail: { url: ${escapeScriptString(url)} } }));`;
-      window.webview.executeJavascript(script);
+  mainWindow.webview.on("dom-ready", () => {
+    debugLog("mainWindow.webview: dom-ready")
+    if (!daemonRuntime) {
+      debugLog("mainWindow.webview: dom-ready skipped (no daemon runtime)")
+      return
     }
-  });
 
-  window.show();
-  window.focus();
-  console.log("[desktop] Window shown and focused");
+    injectRuntimeConfig(mainWindow, daemonRuntime.url)
+  })
+
+  mainWindow.on("close", () => {
+    debugLog("mainWindow: close event")
+    void stopDaemonRuntime()
+  })
+
+  Electrobun.events.on("before-quit", handleBeforeQuit)
+
+  console.log(`[desktop] Started with UI source: ${sourceUrl}`)
+  console.log(
+    `[desktop] Daemon API URL: ${daemonRuntime.url} (${daemonRuntime.source === "spawned" ? "managed" : "attached"})`
+  )
 }
 
-startDesktopShell().catch((error) => {
-  console.error("[desktop] Failed to start desktop shell.", error);
-  process.exitCode = 1;
-});
+startDesktopShell().catch(async (error: unknown) => {
+  debugLog(`startDesktopShell: failed ${(error as Error)?.message ?? String(error)}`)
+  const message = error instanceof Error ? error.message : String(error)
+  console.error("[desktop] Failed to start desktop shell", error)
+
+  await stopDaemonRuntime()
+
+  try {
+    await Utils.showMessageBox({
+      type: "error",
+      title: "Mr. Burns failed to start",
+      message,
+      buttons: ["Close"],
+      defaultId: 0,
+      cancelId: 0,
+    })
+  } catch {
+    // Ignore secondary dialog errors.
+  }
+
+  process.exitCode = 1
+  Utils.quit()
+})

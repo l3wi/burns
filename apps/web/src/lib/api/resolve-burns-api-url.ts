@@ -1,11 +1,16 @@
-export const DEFAULT_BURNS_API_URL = "http://localhost:7332"
+import {
+  burnsRuntimeConfigSchema,
+  type BurnsResolvedApiUrl,
+  DEFAULT_BURNS_API_URL,
+} from "@mr-burns/shared"
 
-export type BurnsRuntimeConfig = {
+type BurnsRuntimeConfigInput = {
   burnsApiUrl?: unknown
+  runtimeMode?: unknown
 }
 
 type ResolveBurnsApiUrlInput = {
-  runtimeConfig?: BurnsRuntimeConfig | null
+  runtimeConfig?: BurnsRuntimeConfigInput | null
   envBurnsApiUrl?: unknown
 }
 
@@ -31,21 +36,32 @@ function parseBurnsApiUrl(value: unknown): string | null {
   }
 }
 
-export function resolveBurnsApiUrl(input: ResolveBurnsApiUrlInput): string {
-  const runtimeConfigUrl = parseBurnsApiUrl(input.runtimeConfig?.burnsApiUrl)
+function readRuntimeConfigApiUrl(
+  runtimeConfig: BurnsRuntimeConfigInput | null | undefined
+): string | null {
+  const parsedRuntime = burnsRuntimeConfigSchema.safeParse(runtimeConfig)
+  if (parsedRuntime.success) {
+    return parsedRuntime.data.burnsApiUrl
+  }
+
+  return parseBurnsApiUrl(runtimeConfig?.burnsApiUrl)
+}
+
+export function resolveBurnsApiUrl(input: ResolveBurnsApiUrlInput): BurnsResolvedApiUrl {
+  const runtimeConfigUrl = readRuntimeConfigApiUrl(input.runtimeConfig)
   if (runtimeConfigUrl) {
-    return runtimeConfigUrl
+    return { apiUrl: runtimeConfigUrl, source: "runtime-config" }
   }
 
   const envUrl = parseBurnsApiUrl(input.envBurnsApiUrl)
   if (envUrl) {
-    return envUrl
+    return { apiUrl: envUrl, source: "vite-env" }
   }
 
-  return DEFAULT_BURNS_API_URL
+  return { apiUrl: DEFAULT_BURNS_API_URL, source: "fallback" }
 }
 
-export function resolveBurnsApiUrlFromBrowserRuntime(): string {
+export function resolveBurnsApiUrlFromBrowserRuntime(): BurnsResolvedApiUrl {
   const runtimeConfig =
     typeof window === "undefined" ? undefined : window.__BURNS_RUNTIME_CONFIG__
 

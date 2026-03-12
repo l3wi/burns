@@ -1,45 +1,94 @@
-import { burnsRuntimeConfigSchema } from "@mr-burns/shared"
+import {
+  buildRuntimeConfigInitScript,
+  resolveRuntimeConfig,
+} from "../../apps/desktop/src/runtime-config"
 
-import { startDaemon } from "../../apps/daemon/src/bootstrap/daemon-lifecycle"
-import { resolveRuntimeConfig } from "../../apps/desktop/src/runtime-config"
+const HEALTH_TIMEOUT_MS = 15_000
 
-type HealthResponse = {
-  ok?: boolean
-  service?: string
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function assertDaemonHealth(healthUrl: string) {
-  const response = await fetch(healthUrl)
-  if (!response.ok) {
-    throw new Error(`Daemon health check failed with status ${response.status}`)
+async function waitForDaemonHealth(healthUrl: string) {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < HEALTH_TIMEOUT_MS) {
+    try {
+      const response = await fetch(healthUrl)
+      if (response.ok) {
+        return
+      }
+    } catch {
+      // Keep polling while daemon is warming up.
+    }
+
+    await delay(250)
   }
 
-  const payload = (await response.json()) as HealthResponse
-  if (!payload.ok) {
-    throw new Error(`Daemon health payload did not report ok=true (${JSON.stringify(payload)})`)
+  throw new Error(`Daemon health check did not pass: ${healthUrl}`)
+}
+
+function reserveAvailablePort() {
+  const probeServer = Bun.serve({
+    port: 0,
+    fetch() {
+      return new Response("ok")
+    },
+  })
+
+  const availablePort = probeServer.port
+  probeServer.stop(true)
+  return availablePort
+}
+
+function evaluateRuntimeScript(script: string) {
+  const evaluator = new Function(
+    `
+      const window = {};
+      ${script}
+      return window.__BURNS_RUNTIME_CONFIG__;
+    `
+  )
+
+  return evaluator() as {
+    burnsApiUrl?: unknown
+    runtimeMode?: unknown
   }
 }
 
 async function main() {
-  const runtime = await startDaemon()
+  process.env.BURNS_SMITHERS_MANAGED_MODE = "0"
+  const { startDaemon } = await import("../../apps/daemon/src/bootstrap/daemon-lifecycle")
+  const daemonPort = reserveAvailablePort()
+  const runtime = await startDaemon({ port: daemonPort })
 
   try {
-    await assertDaemonHealth(runtime.healthUrl)
+    await waitForDaemonHealth(runtime.healthUrl)
 
     const runtimeConfig = resolveRuntimeConfig({ daemonApiUrl: runtime.url })
-    const parsedConfig = burnsRuntimeConfigSchema.parse(runtimeConfig)
-
-    if (parsedConfig.runtimeMode !== "desktop") {
-      throw new Error(`Expected runtimeMode=desktop, got ${String(parsedConfig.runtimeMode)}`)
+    if (runtimeConfig.runtimeMode !== "desktop") {
+      throw new Error(`Expected runtimeMode=desktop, got ${String(runtimeConfig.runtimeMode)}`)
     }
 
-    if (!process.env.BURNS_DESKTOP_FORCE_API_URL && parsedConfig.burnsApiUrl !== runtime.url) {
+    if (runtimeConfig.burnsApiUrl !== runtime.url) {
       throw new Error(
-        `Expected runtime config URL to match daemon URL (${runtime.url}), got ${parsedConfig.burnsApiUrl}`
+        `Expected runtime burnsApiUrl=${runtime.url}, got ${runtimeConfig.burnsApiUrl}`
       )
     }
 
-    console.log(`Desktop runtime smoke passed (daemon: ${runtime.url})`)
+    const initScript = buildRuntimeConfigInitScript(runtimeConfig)
+    const injectedConfig = evaluateRuntimeScript(initScript)
+
+    if (injectedConfig.runtimeMode !== "desktop") {
+      throw new Error("Runtime init script did not set desktop runtime mode")
+    }
+
+    if (injectedConfig.burnsApiUrl !== runtime.url) {
+      throw new Error("Runtime init script did not inject daemon API URL")
+    }
+
+    console.log(`[smoke:desktop] Daemon healthy at ${runtime.healthUrl}`)
+    console.log("[smoke:desktop] Desktop runtime config contract validated")
   } finally {
     await runtime.stop()
   }
@@ -47,6 +96,6 @@ async function main() {
 
 main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
-  console.error(`Desktop runtime smoke failed: ${message}`)
+  console.error(`[smoke:desktop] ${message}`)
   process.exitCode = 1
 })

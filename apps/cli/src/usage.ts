@@ -7,9 +7,9 @@ const FULL_USAGE = [
   "  burns web [--host <host>] [--port <port>] [--open]",
   "",
   "Commands:",
-  "  start   Start daemon, optionally open the web UI URL in a browser.",
+  "  start   Start daemon and web UI server, optionally open the web URL in a browser.",
   "  daemon  Start daemon only.",
-  "  web     Serve prebuilt web assets from apps/web/dist.",
+  "  web     Serve prebuilt web assets from dist/web.",
 ].join("\n")
 
 const START_USAGE = [

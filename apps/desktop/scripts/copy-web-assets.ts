@@ -1,11 +1,23 @@
-import { join } from "node:path";
+import { existsSync, statSync } from "node:fs"
+import { join } from "node:path"
 
-const webDistDir = join(import.meta.dir, "..", "..", "web", "dist");
-const desktopViewsDir = join(import.meta.dir, "..", "dist", "views");
+const webDistDir = join(import.meta.dir, "..", "..", "..", "dist", "web")
+const webDistIndex = join(webDistDir, "index.html")
 
-console.log("[desktop][postBuild] Syncing web assets into desktop build output...");
-console.log(
-  "[desktop][postBuild] TODO: Replace placeholder with deterministic copy once final ElectroBun output layout is confirmed.",
-);
-console.log(`[desktop][postBuild] Placeholder source: ${webDistDir}`);
-console.log(`[desktop][postBuild] Placeholder destination: ${desktopViewsDir}`);
+if (!existsSync(webDistDir) || !statSync(webDistDir).isDirectory()) {
+  throw new Error(`[desktop][postBuild] Missing web dist directory: ${webDistDir}`)
+}
+
+if (!existsSync(webDistIndex)) {
+  throw new Error(`[desktop][postBuild] Missing web dist entrypoint: ${webDistIndex}`)
+}
+
+const buildDir = process.env.ELECTROBUN_BUILD_DIR
+if (buildDir && !existsSync(buildDir)) {
+  throw new Error(`[desktop][postBuild] ELECTROBUN_BUILD_DIR does not exist: ${buildDir}`)
+}
+
+console.log(`[desktop][postBuild] Verified web dist source: ${webDistDir}`)
+if (buildDir) {
+  console.log(`[desktop][postBuild] Build directory: ${buildDir}`)
+}

@@ -4,18 +4,18 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "predev": "bun ./scripts/ensure-electrobun-local.ts",
-    "dev": "electrobun dev",
-    "prebuild": "bun ./scripts/ensure-electrobun-local.ts",
-    "build": "electrobun build --env=stable",
-    "prebuild:canary": "bun ./scripts/ensure-electrobun-local.ts",
-    "build:canary": "electrobun build --env=canary",
+    "dev": "bash ./scripts/ensure-electrobun-local-dep.sh && bunx electrobun dev",
+    "build": "bash ./scripts/ensure-electrobun-local-dep.sh && bunx electrobun build --env=stable",
+    "build:canary": "bash ./scripts/ensure-electrobun-local-dep.sh && bunx electrobun build --env=canary",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
+  "dependencies": {
+    "@mr-burns/shared": "workspace:*",
+    "electrobun": "^1.15.1"
+  },
   "devDependencies": {
     "bun-types": "latest",
-    "electrobun": "1.15.1",
     "typescript": "~5.9.3"
   }
 }

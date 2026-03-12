@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -9,7 +12,7 @@ Usage:
     [--version <version>] \
     [--output-dir <dir>]
 
-Builds a CLI tarball artifact with bun pm pack.
+Builds a CLI package archive into output-dir (default: dist/cli).
 USAGE
 }
 
@@ -43,24 +46,43 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "${script_dir}/../.." && pwd)"
-
 if [[ -z "$version" ]]; then
-  version="$(date -u +%Y%m%d%H%M%S)"
+  version="$(bun --print "require('${REPO_ROOT}/apps/cli/package.json').version")"
 fi
 
-mkdir -p "${repo_root}/${output_dir}"
+case "$output_dir" in
+  /*)
+    resolved_output_dir="$output_dir"
+    ;;
+  *)
+    resolved_output_dir="${REPO_ROOT}/${output_dir}"
+    ;;
+esac
 
-safe_version="${version//\//-}"
-archive_name="mr-burns-cli-${channel}-${safe_version}.tgz"
+mkdir -p "$resolved_output_dir"
 
-(
-  cd "${repo_root}/apps/cli"
-  bun pm pack \
-    --destination "${repo_root}/${output_dir}" \
-    --filename "${archive_name}" \
-    --quiet
-)
+tmp_dir="${REPO_ROOT}/.tmp/cli-pack-$$"
+mkdir -p "$tmp_dir"
 
-echo "CLI artifact written to ${output_dir}/${archive_name}"
+packed_path="$(
+  cd "${REPO_ROOT}/apps/cli"
+  bun pm pack --destination "$tmp_dir" --quiet
+)"
+packed_path="$(printf '%s\n' "$packed_path" | tail -n 1)"
+
+case "$packed_path" in
+  /*)
+    source_artifact="$packed_path"
+    ;;
+  *)
+    source_artifact="${tmp_dir}/${packed_path}"
+    ;;
+esac
+
+archive_name="mr-burns-cli-${channel}-${version}.tgz"
+archive_path="${resolved_output_dir}/${archive_name}"
+
+cp "$source_artifact" "$archive_path"
+rm -rf "$tmp_dir"
+
+echo "cli artifact: ${archive_path}"

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
+import { DEFAULT_BURNS_API_URL } from "@mr-burns/shared"
 
-import { DEFAULT_BURNS_API_URL, resolveBurnsApiUrl } from "./resolve-burns-api-url"
+import { resolveBurnsApiUrl } from "./resolve-burns-api-url"
 
 describe("resolveBurnsApiUrl", () => {
   it("prefers runtime config over env when both are valid", () => {
@@ -9,7 +10,10 @@ describe("resolveBurnsApiUrl", () => {
       envBurnsApiUrl: "https://env.example.test:7332",
     })
 
-    expect(resolvedUrl).toBe("https://runtime.example.test:9000")
+    expect(resolvedUrl).toEqual({
+      apiUrl: "https://runtime.example.test:9000",
+      source: "runtime-config",
+    })
   })
 
   it("uses env when runtime config value is missing", () => {
@@ -18,7 +22,10 @@ describe("resolveBurnsApiUrl", () => {
       envBurnsApiUrl: "https://env.example.test:7332",
     })
 
-    expect(resolvedUrl).toBe("https://env.example.test:7332")
+    expect(resolvedUrl).toEqual({
+      apiUrl: "https://env.example.test:7332",
+      source: "vite-env",
+    })
   })
 
   it("falls back to env when runtime config value is malformed", () => {
@@ -27,7 +34,10 @@ describe("resolveBurnsApiUrl", () => {
       envBurnsApiUrl: "https://env.example.test:7332",
     })
 
-    expect(resolvedUrl).toBe("https://env.example.test:7332")
+    expect(resolvedUrl).toEqual({
+      apiUrl: "https://env.example.test:7332",
+      source: "vite-env",
+    })
   })
 
   it("falls back to default when both runtime and env are malformed", () => {
@@ -36,7 +46,10 @@ describe("resolveBurnsApiUrl", () => {
       envBurnsApiUrl: "ftp://env.example.test",
     })
 
-    expect(resolvedUrl).toBe(DEFAULT_BURNS_API_URL)
+    expect(resolvedUrl).toEqual({
+      apiUrl: DEFAULT_BURNS_API_URL,
+      source: "fallback",
+    })
   })
 
   it("falls back to default for blank values", () => {
@@ -45,6 +58,9 @@ describe("resolveBurnsApiUrl", () => {
       envBurnsApiUrl: "",
     })
 
-    expect(resolvedUrl).toBe(DEFAULT_BURNS_API_URL)
+    expect(resolvedUrl).toEqual({
+      apiUrl: DEFAULT_BURNS_API_URL,
+      source: "fallback",
+    })
   })
 })

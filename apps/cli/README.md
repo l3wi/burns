@@ -24,7 +24,7 @@ bun run src/bin.ts --help
 
 ### `burns start`
 
-Starts the daemon using the existing daemon bootstrap entrypoint.
+Starts daemon and (when available) serves prebuilt web assets from `dist/web`.
 
 ```bash
 burns start
@@ -45,7 +45,7 @@ burns daemon
 
 ### `burns web`
 
-Serves static web assets from `apps/web/dist`.
+Serves static web assets from `dist/web`.
 
 ```bash
 burns web
@@ -57,7 +57,7 @@ Options:
 - `--port <port>`: bind port (default: `4173`)
 - `--open`: open served URL in your browser
 
-If `apps/web/dist` is missing, the CLI prints guidance to run:
+If `dist/web` is missing, the CLI prints guidance to run:
 
 ```bash
 bun run build:web
@@ -65,5 +65,15 @@ bun run build:web
 
 ## Notes
 
-- The CLI reuses daemon startup by importing `apps/daemon/src/main.ts` directly.
+- The CLI reuses daemon startup by importing `apps/daemon/src/bootstrap/daemon-lifecycle.ts`.
 - Default daemon API URL is `http://localhost:7332`.
+
+## Packaging helper
+
+Build a CLI artifact tarball for release collection:
+
+```bash
+bun run build:artifact
+```
+
+This writes an archive into `dist/cli` via `scripts/release/build-cli-artifact.sh`.

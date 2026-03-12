@@ -5,7 +5,7 @@
     "types": ["bun-types"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*", "../daemon/src/*"]
     }
   },
   "include": ["src", "electrobun.config.ts", "scripts"]
