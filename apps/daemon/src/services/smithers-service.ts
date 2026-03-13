@@ -12,6 +12,7 @@ import {
   streamSmithersRunEvents,
 } from "@/integrations/smithers/http-client"
 import { ensureWorkspaceSmithersBaseUrl } from "@/services/smithers-instance-service"
+import { ensureWorkspaceSmithersLayout } from "@/services/workspace-layout"
 import { getWorkspaceWorkflowRootPath } from "@/services/workspace-layout"
 import { repairLegacyDefaultWorkflowTemplate } from "@/services/workflow-service"
 import { getWorkspace } from "@/services/workspace-service"
@@ -266,6 +267,7 @@ export async function getRun(workspaceId: string, runId: string) {
 
 export async function startRun(workspaceId: string, input: StartRunInput) {
   const workspace = assertWorkspace(workspaceId)
+  ensureWorkspaceSmithersLayout(workspace.path)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
   repairLegacyDefaultWorkflowTemplate(workspaceId, input.workflowId)
   const workflowPath = resolveWorkflowPath(workspace.path, input.workflowId)
@@ -284,6 +286,7 @@ export async function startRun(workspaceId: string, input: StartRunInput) {
 
 export async function resumeRun(workspaceId: string, runId: string, input: ResumeRunInput) {
   const workspace = assertWorkspace(workspaceId)
+  ensureWorkspaceSmithersLayout(workspace.path)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
   const existingRunPayload = await getSmithersRun(baseUrl, runId)
   const unwrappedRun = unwrapRun(existingRunPayload)

@@ -15,6 +15,7 @@ type ResolveWorkspaceRootOptions = {
 
 const configDir = path.dirname(fileURLToPath(import.meta.url))
 const daemonRoot = path.resolve(configDir, "../..")
+const repositoryRoot = path.resolve(daemonRoot, "../..")
 
 export function resolveBurnsDataRoot(options: ResolveDataRootOptions = {}) {
   const env = options.env ?? process.env
@@ -39,6 +40,7 @@ export function resolveDefaultWorkspaceRoot(options: ResolveWorkspaceRootOptions
 }
 
 export const DAEMON_ROOT = daemonRoot
+export const REPOSITORY_ROOT = repositoryRoot
 export const DATA_ROOT = resolveBurnsDataRoot()
 export const DATABASE_PATH = path.join(DATA_ROOT, "burns.sqlite")
 export const DEFAULT_WORKSPACES_ROOT = resolveDefaultWorkspaceRoot()

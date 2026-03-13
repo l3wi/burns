@@ -1,10 +1,35 @@
-import { existsSync, mkdirSync, renameSync } from "node:fs"
+import { existsSync, lstatSync, mkdirSync, renameSync, symlinkSync } from "node:fs"
 import path from "node:path"
+
+import { REPOSITORY_ROOT } from "@/config/paths"
 
 const WORKSPACE_SMITHERS_DIRECTORY = ".smithers"
 const WORKSPACE_WORKFLOWS_DIRECTORY = "workflows"
 const WORKSPACE_STATE_DIRECTORY = "state"
 const MANAGED_SMITHERS_DB_BASENAME = "smithers.db"
+
+function hasFilesystemEntry(targetPath: string) {
+  try {
+    lstatSync(targetPath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function ensureWorkspaceNodeModulesLink(workspacePath: string) {
+  const workspaceNodeModulesPath = path.join(workspacePath, "node_modules")
+  if (hasFilesystemEntry(workspaceNodeModulesPath)) {
+    return
+  }
+
+  const daemonNodeModulesPath = path.join(REPOSITORY_ROOT, "node_modules")
+  if (!existsSync(daemonNodeModulesPath)) {
+    return
+  }
+
+  symlinkSync(daemonNodeModulesPath, workspaceNodeModulesPath, "dir")
+}
 
 function moveIfPresent(sourcePath: string, destinationPath: string) {
   if (!existsSync(sourcePath) || existsSync(destinationPath)) {
@@ -59,6 +84,7 @@ export function ensureWorkspaceSmithersLayout(workspacePath: string) {
   const workflowRoot = getWorkspaceWorkflowRootPath(workspacePath)
   mkdirSync(workflowRoot, { recursive: true })
   mkdirSync(getWorkspaceSmithersStateDirectory(workspacePath), { recursive: true })
+  ensureWorkspaceNodeModulesLink(workspacePath)
 
   return {
     smithersRoot: getWorkspaceSmithersRoot(workspacePath),

@@ -26,3 +26,4 @@ The format follows Keep a Changelog and this project currently tracks SemVer-sty
 - Removed automatic default-workspace seeding so first-run users land in onboarding instead of a precreated workspace.
 - Moved repo-local workflow and Smithers state storage from `.burns`/legacy `.mr-burns` into `.smithers`, with one-time migration of legacy workspace directories and top-level `smithers.db*` files.
 - Changed default workspace creation root to `~/Documents/Burns`, while Burns app state now defaults to `~/.burns` for direct daemon/web runs and platform app-data locations in desktop mode.
+- Managed workspace runs now create a workspace-local `node_modules` link back to the Burns monorepo so Smithers workflow imports resolve reliably under Bun.
