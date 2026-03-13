@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import path from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
@@ -180,6 +182,104 @@ describe("workflow routes", () => {
     expect(response.status).toBe(400)
     expect(await response.json()).toMatchObject({
       error: expect.stringContaining("createSmithers"),
+    })
+  })
+
+  it("saves a selected workflow file to disk", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+    const workflowDirectoryPath = path.join(
+      resolveTestWorkspacePath(workspaceId),
+      ".smithers",
+      "workflows",
+      "custom-flow"
+    )
+    const filePath = path.join(workflowDirectoryPath, "notes.md")
+
+    mkdirSync(workflowDirectoryPath, { recursive: true })
+    writeFileSync(path.join(workflowDirectoryPath, "workflow.tsx"), validWorkflowSource, "utf8")
+    writeFileSync(filePath, "before", "utf8")
+
+    const response = await app.fetch(
+      new Request(
+        `http://localhost:7332/api/workspaces/${workspaceId}/workflows/custom-flow/files/content?path=notes.md`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ source: "# Updated" }),
+        }
+      )
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      workflowId: "custom-flow",
+      path: "notes.md",
+      source: "# Updated",
+    })
+    expect(readFileSync(filePath, "utf8")).toBe("# Updated")
+  })
+
+  it("saves workflow.ts edits back to workflow.ts instead of creating workflow.tsx", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+    const workflowDirectoryPath = path.join(
+      resolveTestWorkspacePath(workspaceId),
+      ".smithers",
+      "workflows",
+      "custom-flow"
+    )
+    const workflowTsPath = path.join(workflowDirectoryPath, "workflow.ts")
+
+    mkdirSync(workflowDirectoryPath, { recursive: true })
+    writeFileSync(workflowTsPath, validWorkflowSource, "utf8")
+
+    const response = await app.fetch(
+      new Request(
+        `http://localhost:7332/api/workspaces/${workspaceId}/workflows/custom-flow/files/content?path=workflow.ts`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ source: directCtxInputSource }),
+        }
+      )
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      workflowId: "custom-flow",
+      path: "workflow.ts",
+    })
+    expect(readFileSync(workflowTsPath, "utf8")).toContain('name="echo"')
+  })
+
+  it("rejects workflow file saves that escape the workflow directory", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+    const workflowDirectoryPath = path.join(
+      resolveTestWorkspacePath(workspaceId),
+      ".smithers",
+      "workflows",
+      "custom-flow"
+    )
+
+    mkdirSync(workflowDirectoryPath, { recursive: true })
+    writeFileSync(path.join(workflowDirectoryPath, "workflow.tsx"), validWorkflowSource, "utf8")
+
+    const response = await app.fetch(
+      new Request(
+        `http://localhost:7332/api/workspaces/${workspaceId}/workflows/custom-flow/files/content?path=../escape.ts`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ source: "nope" }),
+        }
+      )
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining("escapes workflow directory"),
     })
   })
 

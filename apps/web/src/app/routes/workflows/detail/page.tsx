@@ -1,7 +1,7 @@
 import { CheckIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { useEffect, useMemo, useState } from "react"
-import { useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { FileTree, FileTreeFile, FileTreeFolder } from "@/components/ai-elements/file-tree"
 import {
@@ -164,6 +164,7 @@ export function WorkflowDetailPage() {
   )
   const [selectedAgentId, setSelectedAgentId] = useState<string>("")
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false)
+  const [hasUnsavedEditorChanges, setHasUnsavedEditorChanges] = useState(false)
 
   const workflowsBasePath = workspaceId ? `/w/${workspaceId}/workflows` : "/"
   const resolvedSelectedAgentId = selectedAgentId || agentClis[0]?.id || ""
@@ -221,6 +222,7 @@ export function WorkflowDetailPage() {
     }
     return next
   }, [expandedPaths, requiredExpandedPaths])
+  const navigationBlocker = useBlocker(hasUnsavedEditorChanges)
 
   useEffect(() => {
     if (!workflowId || isWorkflowListLoading) {
@@ -231,6 +233,35 @@ export function WorkflowDetailPage() {
       navigate(workflowsBasePath, { replace: true })
     }
   }, [isWorkflowListLoading, navigate, workflowId, workflows, workflowsBasePath])
+
+  useEffect(() => {
+    if (navigationBlocker.state !== "blocked") {
+      return
+    }
+
+    if (window.confirm("Discard unsaved workflow edits?")) {
+      navigationBlocker.proceed()
+      return
+    }
+
+    navigationBlocker.reset()
+  }, [navigationBlocker])
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedEditorChanges) {
+        return
+      }
+
+      event.preventDefault()
+      event.returnValue = ""
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [hasUnsavedEditorChanges])
 
   function handleAgentSubmit(message: PromptInputMessage) {
     if (!workspace || !workflowId || !resolvedSelectedAgentId) {
@@ -258,8 +289,8 @@ export function WorkflowDetailPage() {
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-x-hidden xl:overflow-y-hidden">
       <div className="grid w-full min-w-0 max-w-full gap-2 p-0 xl:h-full xl:min-h-0 xl:grid-cols-[22rem_1fr] xl:grid-rows-[minmax(0,1fr)] xl:overflow-hidden">
-        <Card className="m-0 min-w-0 gap-0 rounded-none border border-border border-r-0 py-2 pl-2 pr-0 ring-0 xl:flex xl:min-h-0 xl:flex-col">
-          <CardContent className="flex flex-col gap-2 px-0 xl:min-h-0 xl:flex-1 xl:overflow-hidden">
+        <Card className="m-0 min-w-0 gap-0 overflow-visible rounded-none py-2 pl-2 pr-0 ring-0 xl:flex xl:min-h-0 xl:flex-col">
+          <CardContent className="flex flex-col gap-2 overflow-visible px-0 xl:min-h-0 xl:flex-1 xl:overflow-visible">
             <div className="min-h-0 flex-1 overflow-hidden">
               {isWorkflowListLoading || workflowFilesQuery.isLoading ? (
                 <p className="text-sm text-muted-foreground">Loading workflow files…</p>
@@ -364,7 +395,7 @@ export function WorkflowDetailPage() {
 
         <div className="flex min-w-0 flex-col gap-0 xl:min-h-0 xl:overflow-hidden">
           {editWorkflow.isPending ? (
-            <Card className="m-0 gap-0 rounded-none border border-border border-l-0 py-2 pl-0 pr-2 ring-0 xl:h-full xl:min-h-0 xl:flex xl:flex-col">
+            <Card className="m-0 gap-0 rounded-none py-2 pl-0 pr-2 ring-0 xl:h-full xl:min-h-0 xl:flex xl:flex-col">
               <CardContent className="flex flex-1 flex-col gap-3 overflow-hidden px-0 xl:min-h-0">
                 <WorkflowAuthoringConversationPanel
                   isStreaming={editWorkflow.isPending}
@@ -377,6 +408,10 @@ export function WorkflowDetailPage() {
               workflow={workflowDocument ?? null}
               sourceOverride={workflowSourceOverride}
               fileName={selectedPath ?? "workflow.tsx"}
+              filePath={selectedPath}
+              workspaceId={workspaceId}
+              workflowId={workflowId}
+              onDirtyChange={setHasUnsavedEditorChanges}
             />
           )}
         </div>

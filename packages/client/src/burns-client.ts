@@ -340,6 +340,24 @@ export class BurnsClient {
     return workflowDocumentListSchema.parse(data)
   }
 
+  async saveWorkflowFile(
+    workspaceId: string,
+    workflowId: string,
+    filePath: string,
+    source: UpdateWorkflowInput["source"]
+  ): Promise<WorkflowFileDocument> {
+    const search = new URLSearchParams({ path: filePath })
+    const data = await this.request<unknown>(
+      `/api/workspaces/${workspaceId}/workflows/${workflowId}/files/content?${search.toString()}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ source }),
+      }
+    )
+
+    return workflowFileDocumentDtoSchema.parse(data)
+  }
+
   async generateWorkflow(
     workspaceId: string,
     input: GenerateWorkflowInput

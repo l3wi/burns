@@ -20,6 +20,7 @@ import {
   getWorkflowDirectoryPath,
   listWorkflowFiles,
   listWorkflows,
+  saveWorkflowFile,
   saveWorkflow,
 } from "@/services/workflow-service"
 import { buildRuntimeContext } from "@/runtime-context"
@@ -288,6 +289,26 @@ export async function handleWorkflowRoutes(
       return Response.json(
         workflowFileDocumentSchema.parse(
           getWorkflowFile(workflowFileContentMatch[1], workflowFileContentMatch[2], filePath)
+        )
+      )
+    }
+
+    if (workflowFileContentMatch && request.method === "PUT") {
+      const url = new URL(request.url)
+      const filePath = url.searchParams.get("path")
+      if (!filePath) {
+        throw new HttpError(400, "Missing file path")
+      }
+
+      const input = updateWorkflowInputSchema.parse(await request.json())
+      return Response.json(
+        workflowFileDocumentSchema.parse(
+          saveWorkflowFile(
+            workflowFileContentMatch[1],
+            workflowFileContentMatch[2],
+            filePath,
+            input.source
+          )
         )
       )
     }

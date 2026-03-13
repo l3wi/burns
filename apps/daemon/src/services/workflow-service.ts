@@ -350,6 +350,21 @@ function normalizeAndValidateWorkflowSource(source: string) {
   return normalizedSource
 }
 
+function buildBurnsWorkflowLayoutGuidance(params: {
+  workflowId: string
+  targetRelativeFile: string
+}) {
+  return [
+    "Burns stores each workflow under its own folder at .smithers/workflows/<workflow-id>/ and launches the root entry file named workflow.tsx or workflow.ts.",
+    `Keep the canonical runnable entry file at ${params.targetRelativeFile}. That entry file must remain the root workflow entrypoint and default export smithers((ctx) => (...)).`,
+    "For small workflows, prefer a single-file entry workflow. For larger or production workflows, you may split code into multiple supporting files inside the same workflow folder.",
+    "Supporting files may include components/, prompts/, lib/, agents.ts, smithers.ts, schemas.ts, config.ts, system-prompt.ts, preload.ts, and bunfig.toml when they improve structure.",
+    `You may create or update multiple files under .smithers/workflows/${params.workflowId}/ when needed for shared schemas, agents, prompt templates, MDX files, helpers, or composed components.`,
+    `Do not create another workflow folder, do not move the entry file out of .smithers/workflows/${params.workflowId}/, and do not write outside that workflow folder unless the user explicitly asks for broader repository changes.`,
+    "If you split the workflow across files, keep imports relative and Bun/TypeScript friendly so Burns can browse the files and Smithers can run the root entry file successfully.",
+  ].join("\n")
+}
+
 export function buildWorkflowGenerationPrompt(params: {
   workflowName: string
   workflowId: string
@@ -360,9 +375,9 @@ export function buildWorkflowGenerationPrompt(params: {
 }) {
   return [
     "You are authoring a Smithers workflow for Burns inside a real workspace.",
-    "Use your file editing tools to create or overwrite the target workflow file.",
+    "Use your file editing tools to create or overwrite the target workflow entry file and any necessary supporting files.",
     "Do NOT return the workflow source in chat unless absolutely necessary.",
-    "Your primary task is to write the file on disk.",
+    "Your primary task is to write the workflow files on disk.",
     "After writing the file, respond with a short success confirmation only.",
     "Use stable kebab-case task IDs.",
     `Workflow display name: ${params.workflowName}`,
@@ -377,6 +392,10 @@ export function buildWorkflowGenerationPrompt(params: {
     "Always define output schemas and reference outputs with output={outputs.<schemaKey>}.",
     "Define reusable agents and any shared prompt constants near the top of the file when agent-driven tasks are involved.",
     "Create any missing folders needed for the target file.",
+    buildBurnsWorkflowLayoutGuidance({
+      workflowId: params.workflowId,
+      targetRelativeFile: `.smithers/workflows/${params.workflowId}/workflow.tsx`,
+    }),
     buildAvailableAgentCliDigest({
       selectedAgentId: params.selectedAgentId,
       availableAgentClis: params.availableAgentClis,
@@ -403,11 +422,10 @@ export function buildWorkflowEditPrompt(params: {
 }) {
   return [
     "You are editing an existing Smithers workflow for Burns inside a real workspace.",
-    "First read the current workflow file from disk before making changes.",
-    "Then overwrite that same file on disk with the updated workflow.",
-    "Do NOT create a new workflow folder or a second file.",
+    "First read the current workflow entry file and any related files from disk before making changes.",
+    "Then update the workflow entry file and any supporting files on disk as needed.",
     "Do NOT return the full workflow source in chat unless absolutely necessary.",
-    "Your primary task is to update the existing file on disk.",
+    "Your primary task is to update the existing workflow files on disk.",
     "After writing the file, respond with a short success confirmation only.",
     "Preserve stable kebab-case task IDs unless the user explicitly asks to rename them.",
     `Workflow display name: ${params.workflowName}`,
@@ -420,6 +438,10 @@ export function buildWorkflowEditPrompt(params: {
     "Always import createSmithers from smithers-orchestrator and z from zod.",
     "Always define output schemas and reference outputs with output={outputs.<schemaKey>}.",
     "Keep reusable agents and shared prompt constants explicit instead of burying them inside task bodies.",
+    buildBurnsWorkflowLayoutGuidance({
+      workflowId: params.workflowId,
+      targetRelativeFile: params.relativeFilePath,
+    }),
     buildAvailableAgentCliDigest({
       selectedAgentId: params.selectedAgentId,
       availableAgentClis: params.availableAgentClis,
@@ -447,8 +469,8 @@ export function buildWorkflowRepairPrompt(params: {
 }) {
   return [
     "You are repairing a Smithers workflow file after validation failed.",
-    "Read the current workflow file and overwrite that same file on disk with a corrected version.",
-    "Do not create a second workflow file and do not rename the workflow folder.",
+    "Read the current workflow entry file and any supporting files needed to understand the failure.",
+    "Update the existing workflow entry file and any supporting files on disk with a corrected version.",
     "Do not return the full file in chat.",
     "After fixing the file on disk, reply with a short success confirmation only.",
     `Workflow display name: ${params.workflowName}`,
@@ -459,6 +481,10 @@ export function buildWorkflowRepairPrompt(params: {
     "The file must define smithers via createSmithers(...) and default export smithers((ctx) => (...)).",
     "Every task output must use output={outputs.<schemaKey>}.",
     "If the workflow uses agents, define them explicitly and keep the prompts/schema contract coherent.",
+    buildBurnsWorkflowLayoutGuidance({
+      workflowId: params.workflowId,
+      targetRelativeFile: params.relativeFilePath,
+    }),
     buildAvailableAgentCliDigest({
       selectedAgentId: params.selectedAgentId,
       availableAgentClis: params.availableAgentClis,
@@ -504,7 +530,7 @@ function isNonFatalCodexWarning(error: unknown) {
 }
 
 const workflowAuthorSystemPrompt =
-  "You author Smithers workflow files. Write the requested file to disk and then return a short success confirmation."
+  "You author Smithers workflow files. Write the workflow entry file and any necessary supporting files to disk, then return a short success confirmation."
 
 function getWorkflowFilePath(workspaceId: string, workflowId: string) {
   const workflowRoot = getWorkflowRoot(workspaceId)
@@ -558,6 +584,27 @@ function resolveWorkflowFilePath(workflowDirectoryPath: string, inputPath: strin
     normalizedPath,
     resolvedPath,
   }
+}
+
+function resolveWorkflowFileOutputPath(workflowDirectoryPath: string, inputPath: string) {
+  const normalizedPath = normalizeWorkflowFilePath(inputPath)
+  const resolvedPath = path.resolve(workflowDirectoryPath, normalizedPath)
+  const rootPrefix = workflowDirectoryPath.endsWith(path.sep)
+    ? workflowDirectoryPath
+    : `${workflowDirectoryPath}${path.sep}`
+
+  if (resolvedPath !== workflowDirectoryPath && !resolvedPath.startsWith(rootPrefix)) {
+    throw new HttpError(400, "Workflow file path escapes workflow directory")
+  }
+
+  return {
+    normalizedPath,
+    resolvedPath,
+  }
+}
+
+function isWorkflowSourceFilePath(filePath: string) {
+  return filePath === "workflow.tsx" || filePath === "workflow.ts"
 }
 
 function mapWorkflowFile(workspaceId: string, workflowId: string, filePath: string): Workflow {
@@ -657,6 +704,10 @@ function extractCtxInputKeys(source: string) {
   return keys
 }
 
+function hasDirectCtxInputReference(source: string) {
+  return /ctx\.input(?!\s*\??\.)/.test(source)
+}
+
 export function getWorkflowLaunchFields(
   workspaceId: string,
   workflowId: string
@@ -679,6 +730,17 @@ export function getWorkflowLaunchFields(
   // are discovered even when the first task only interpolates `${feature}`.
   const inferenceSegment = workflow.source.slice(0, taskEndIndex)
   const inputKeys = extractCtxInputKeys(inferenceSegment)
+
+  if (inputKeys.length === 0 && hasDirectCtxInputReference(inferenceSegment)) {
+    return {
+      workflowId,
+      mode: "fallback",
+      entryTaskId,
+      fields: [],
+      message: "Workflow reads ctx.input directly. Provide a JSON object for the run input.",
+    }
+  }
+
   if (inputKeys.length === 0) {
     return {
       workflowId,
@@ -807,14 +869,39 @@ export function getWorkflowFile(workspaceId: string, workflowId: string, filePat
 export function saveWorkflow(workspaceId: string, workflowId: string, source: string) {
   const workflowRoot = getWorkflowRoot(workspaceId)
   const workflowDir = path.join(workflowRoot, workflowId)
-  const filePath = path.join(workflowDir, "workflow.tsx")
-
-  const normalizedSource = normalizeAndValidateWorkflowSource(source)
+  const filePath = existsSync(path.join(workflowDir, "workflow.tsx"))
+    ? path.join(workflowDir, "workflow.tsx")
+    : existsSync(path.join(workflowDir, "workflow.ts"))
+      ? path.join(workflowDir, "workflow.ts")
+      : path.join(workflowDir, "workflow.tsx")
+  const fileName = path.basename(filePath)
 
   mkdirSync(workflowDir, { recursive: true })
-  writeFileSync(filePath, normalizedSource, "utf8")
+  saveWorkflowFile(workspaceId, workflowId, fileName, source)
 
   return getWorkflow(workspaceId, workflowId)
+}
+
+export function saveWorkflowFile(
+  workspaceId: string,
+  workflowId: string,
+  filePath: string,
+  source: string
+) {
+  const workflowDirectoryPath = getWorkflowDirectoryPath(workspaceId, workflowId)
+  const { normalizedPath, resolvedPath } = resolveWorkflowFileOutputPath(workflowDirectoryPath, filePath)
+  const nextSource = isWorkflowSourceFilePath(normalizedPath)
+    ? normalizeAndValidateWorkflowSource(source)
+    : source
+
+  mkdirSync(path.dirname(resolvedPath), { recursive: true })
+  writeFileSync(resolvedPath, nextSource, "utf8")
+
+  return {
+    workflowId,
+    path: normalizedPath,
+    source: readFileSync(resolvedPath, "utf8"),
+  }
 }
 
 export function deleteWorkflow(workspaceId: string, workflowId: string) {
