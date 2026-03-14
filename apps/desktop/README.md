@@ -6,9 +6,11 @@ ElectroBun desktop shell package for Burns.
 
 - Starts a desktop shell from Bun entrypoint: `src/main.ts`
 - Starts the daemon runtime in-process before window creation
+- Keeps Burns running in the macOS tray after the main window closes, while leaving the app visible in the Dock
 - Blocks startup when another Burns daemon is already listening on the configured desktop URL, unless attach mode is explicitly enabled for development
 - Loads packaged web UI (`views://mainview/index.html`)
 - Injects runtime config into web at startup via `window.__BURNS_RUNTIME_CONFIG__`
+- Polls aggregate tray status from the daemon and exposes native tray actions for `Open Burns`, pending approvals, running workflows, and `Exit (Stop Server)`
 - Uses ElectroBun lifecycle scripts for web build + post-build verification
 
 ## Commands
@@ -58,3 +60,4 @@ Environment controls:
 
 - `bun run dev` sets `BURNS_DESKTOP_ALLOW_ATTACH_EXISTING=1` so desktop development can reuse a CLI-run daemon.
 - Uses official `electrobun/bun` APIs directly (`BrowserWindow`, app events, native dialogs).
+- Bundles tray icons from `apps/desktop/assets/tray/favicon-black.png` and `apps/desktop/assets/tray/favicon-white.png`.

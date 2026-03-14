@@ -47,6 +47,8 @@ import {
   workspaceSmithersRuntimeConfigSchema,
   workspaceServerStatusSchema,
   workspaceSchema,
+  burnsTrayStatusSchema,
+  type BurnsTrayStatus,
 } from "@burns/shared"
 import { z } from "zod"
 
@@ -74,6 +76,7 @@ const validateSmithersUrlResponseSchema = z.object({
   status: z.number().nullable(),
   message: z.string(),
 })
+const burnsTrayStatusDtoSchema = burnsTrayStatusSchema
 
 function extractErrorMessage(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") {
@@ -268,6 +271,11 @@ export class BurnsClient {
   async getRuntimeContext() {
     const data = await this.request<unknown>("/api/system/runtime-context")
     return runtimeContextSchema.parse(data)
+  }
+
+  async getTrayStatus(): Promise<BurnsTrayStatus> {
+    const data = await this.request<unknown>("/api/system/tray-status")
+    return burnsTrayStatusDtoSchema.parse(data)
   }
 
   async validateSmithersUrl(baseUrl: string): Promise<{

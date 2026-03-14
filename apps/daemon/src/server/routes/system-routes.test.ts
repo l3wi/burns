@@ -68,4 +68,35 @@ describe("handleSystemRoutes", () => {
       message: "validated http://localhost:7331",
     })
   })
+
+  it("returns aggregate tray status", async () => {
+    const response = await handleSystemRoutes(
+      new Request("http://localhost:7332/api/system/tray-status", {
+        method: "GET",
+      }),
+      "/api/system/tray-status",
+      {
+        getTrayStatus: async () => ({
+          pendingCount: 1,
+          runningCount: 2,
+          pendingTarget: {
+            kind: "run",
+            workspaceId: "workspace-1",
+            runId: "run-1",
+          },
+        }),
+      }
+    )
+
+    expect(response?.status).toBe(200)
+    expect(await response?.json()).toEqual({
+      pendingCount: 1,
+      runningCount: 2,
+      pendingTarget: {
+        kind: "run",
+        workspaceId: "workspace-1",
+        runId: "run-1",
+      },
+    })
+  })
 })

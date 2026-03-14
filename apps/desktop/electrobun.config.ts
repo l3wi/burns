@@ -15,6 +15,8 @@ export default {
     artifactFolder: "../../dist/desktop/artifacts",
     copy: {
       "../../dist/web": "views/mainview",
+      "./assets/tray/favicon-black.png": "views/tray/favicon-black.png",
+      "./assets/tray/favicon-white.png": "views/tray/favicon-white.png",
     },
     mac: {
       bundleCEF: false,
@@ -33,7 +35,7 @@ export default {
     },
   },
   runtime: {
-    exitOnLastWindowClosed: true,
+    exitOnLastWindowClosed: false,
   },
   scripts: {
     preBuild: "./scripts/prebuild-web.ts",

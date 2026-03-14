@@ -38,7 +38,7 @@ This makes Burns useful when you want more than `smithers run workflow.tsx`. It 
 | --- | --- |
 | `apps/web` | React UI for workspaces, workflows, runs, approvals, and settings |
 | `apps/daemon` | Local Bun HTTP daemon, workspace registry, Smithers lifecycle manager, and workflow authoring APIs |
-| `apps/desktop` | ElectroBun desktop shell that starts the daemon and blocks if another Burns instance is already running, with a dev-only attach escape hatch |
+| `apps/desktop` | ElectroBun desktop shell that starts the daemon, runs in the macOS tray after window close, and blocks if another Burns instance is already running except for a dev-only attach escape hatch |
 | `apps/cli` | CLI runtime for starting the daemon and serving built web assets |
 | `packages/shared` | Shared schemas and domain types |
 | `packages/client` | Typed API client used by the frontend |
@@ -76,7 +76,7 @@ bun run cli:start
 
 ## Current State
 
-Today Burns includes workspace onboarding, workspace overview quick actions, workflow browsing, AI-assisted workflow generation and editing, launch-field inference, Smithers-backed run APIs, approvals, managed per-workspace Smithers processes, and desktop/CLI runtime shells.
+Today Burns includes workspace onboarding, workspace overview quick actions, workflow browsing, AI-assisted workflow generation and editing, launch-field inference, Smithers-backed run APIs, approvals, managed per-workspace Smithers processes, desktop/CLI runtime shells, and a background desktop tray mode with aggregated pending/running workflow counts.
 
 ## For Developers
 

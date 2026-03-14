@@ -1,8 +1,10 @@
 import {
+  type BurnsTrayStatus,
   burnsRuntimeContextSchema,
   type RuntimeContext,
 } from "@burns/shared"
 import { pickDirectoryWithNativeDialog } from "@/services/native-folder-picker-service"
+import { getTrayStatus } from "@/services/tray-status-service"
 import { validateSmithersBaseUrl } from "@/services/smithers-validation-service"
 import { buildRuntimeContext, isLoopbackHost } from "@/runtime-context"
 import { HttpError, toErrorResponse } from "@/utils/http-error"
@@ -14,6 +16,7 @@ type HandleSystemRoutesOptions = {
     status: number | null
     message: string
   }>
+  getTrayStatus?: () => Promise<BurnsTrayStatus>
 }
 
 export async function handleSystemRoutes(
@@ -50,6 +53,11 @@ export async function handleSystemRoutes(
       )
 
       return Response.json(runtimeContext)
+    }
+
+    if (pathname === "/api/system/tray-status" && request.method === "GET") {
+      const resolveTrayStatus = options.getTrayStatus ?? getTrayStatus
+      return Response.json(await resolveTrayStatus())
     }
 
     return null
