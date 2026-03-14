@@ -15,6 +15,7 @@ import {
   getWorkspace,
   listWorkspaces,
 } from "@/services/workspace-service"
+import { discoverLocalWorkflows } from "@/services/workflow-service"
 import { openDirectoryFolder } from "@/services/workflow-open-service"
 import { HttpError, toErrorResponse } from "@/utils/http-error"
 
@@ -36,6 +37,25 @@ export async function handleWorkspaceRoutes(
       const input = createWorkspaceInputSchema.parse(await request.json())
       const workspace = createWorkspace(input)
       return Response.json(workspace, { status: 201 })
+    }
+
+    if (pathname === "/api/workspaces/discover-local-workflows" && request.method === "POST") {
+      const requestUrl = new URL(request.url)
+      const runtimeContext = buildRuntimeContext({
+        runtimeMode: process.env.BURNS_RUNTIME_MODE,
+        requestHostname: requestUrl.hostname,
+      })
+
+      if (!runtimeContext.capabilities.openNativeFolderPicker) {
+        throw new HttpError(403, "Local workflow discovery is only available on local daemon URLs.")
+      }
+
+      const input = (await request.json().catch(() => null)) as { localPath?: unknown } | null
+      if (!input || typeof input.localPath !== "string" || !input.localPath.trim()) {
+        throw new HttpError(400, "Local repository path is required.")
+      }
+
+      return Response.json(discoverLocalWorkflows(input.localPath))
     }
 
     const healthMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/health$/)

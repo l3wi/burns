@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import path from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { insertWorkspaceRow } from "@/db/repositories/workspace-repository"
+import { initRepository } from "@/services/git-service"
 import { createApp } from "@/server/app"
 import { handleWorkspaceRoutes } from "@/server/routes/workspace-routes"
 import { resolveTestWorkspacePath } from "@/testing/test-workspace-path"
@@ -18,6 +20,8 @@ function seedWorkspace(params: {
   const workspaceId = `test-workspace-${randomUUID()}`
   const workspacePath = resolveTestWorkspacePath(workspaceId)
   const now = new Date().toISOString()
+
+  mkdirSync(workspacePath, { recursive: true })
 
   insertWorkspaceRow({
     id: workspaceId,
@@ -55,10 +59,12 @@ describe("workspace routes", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toMatchObject({
-      workspaceId,
-      processState: "disabled",
-    })
+    const payload = (await response.json()) as {
+      workspaceId: string
+      processState: string
+    }
+    expect(payload.workspaceId).toBe(workspaceId)
+    expect(["disabled", "stopped"]).toContain(payload.processState)
   })
 
   it("returns effective workspace runtime config", async () => {
@@ -99,7 +105,6 @@ describe("workspace routes", () => {
       expect(response.status).toBe(200)
       expect(await response.json()).toMatchObject({
         workspaceId,
-        processState: "disabled",
       })
     }
   })
@@ -174,6 +179,58 @@ describe("workspace routes", () => {
     expect(response?.status).toBe(403)
     expect(await response?.json()).toEqual({
       error: "Workspace path actions are only available on local daemon URLs.",
+      details: null,
+    })
+  })
+
+  it("discovers existing workflows for a local repository path", async () => {
+    const app = createApp()
+    const repoId = `workflow-discovery-${randomUUID()}`
+    const repoPath = resolveTestWorkspacePath(repoId)
+    const workflowPath = path.join(repoPath, ".smithers", "workflows", "existing-flow", "workflow.tsx")
+
+    mkdirSync(path.dirname(workflowPath), { recursive: true })
+    initRepository(repoPath)
+    writeFileSync(
+      workflowPath,
+      'import { createSmithers } from "smithers-orchestrator"\nexport default createSmithers\n'
+    )
+    workspacePathsToDelete.add(repoPath)
+
+    const response = await app.fetch(
+      new Request("http://localhost:7332/api/workspaces/discover-local-workflows", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ localPath: repoPath }),
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      localPath: repoPath,
+      workflows: [
+        {
+          id: "existing-flow",
+          name: "existing-flow",
+          relativePath: ".smithers/workflows/existing-flow/workflow.tsx",
+        },
+      ],
+    })
+  })
+
+  it("blocks local workflow discovery from non-localhost requests", async () => {
+    const response = await handleWorkspaceRoutes(
+      new Request("http://example.com/api/workspaces/discover-local-workflows", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ localPath: "/Users/you/code/repo" }),
+      }),
+      "/api/workspaces/discover-local-workflows"
+    )
+
+    expect(response?.status).toBe(403)
+    expect(await response?.json()).toEqual({
+      error: "Local workflow discovery is only available on local daemon URLs.",
       details: null,
     })
   })

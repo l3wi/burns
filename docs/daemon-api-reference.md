@@ -121,7 +121,38 @@ Creates a workspace from one of three source types:
 
 Request body is validated by `createWorkspaceInputSchema`.
 
+When `workflowTemplateIds` is provided on a Burns-managed workspace, Burns adds only the selected template workflows and preserves any existing workflow files already present in the repo.
+
 For new workspaces, daemon-managed Smithers mode starts a workspace-local Smithers server in the background.
+
+## `POST /api/workspaces/discover-local-workflows`
+
+Scans a local repository path for existing Burns workflows under `.smithers/workflows`.
+
+Available only from loopback/local daemon URLs.
+
+Request body:
+
+```json
+{
+  "localPath": "/absolute/path/to/repo"
+}
+```
+
+Response body:
+
+```json
+{
+  "localPath": "/absolute/path/to/repo",
+  "workflows": [
+    {
+      "id": "issue-to-pr",
+      "name": "issue-to-pr",
+      "relativePath": ".smithers/workflows/issue-to-pr/workflow.tsx"
+    }
+  ]
+}
+```
 
 ## `GET /api/workspaces/:workspaceId`
 

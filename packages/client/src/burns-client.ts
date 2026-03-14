@@ -27,6 +27,8 @@ import {
   onboardingStatusSchema,
   type FactoryResetResult,
   factoryResetResultSchema,
+  type LocalWorkflowDiscoveryResponse,
+  localWorkflowDiscoveryResponseSchema,
   type UpdateWorkflowInput,
   type Workflow,
   type WorkflowFileDocument,
@@ -77,6 +79,7 @@ const validateSmithersUrlResponseSchema = z.object({
   message: z.string(),
 })
 const burnsTrayStatusDtoSchema = burnsTrayStatusSchema
+const localWorkflowDiscoveryResponseDtoSchema = localWorkflowDiscoveryResponseSchema
 
 function extractErrorMessage(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") {
@@ -289,6 +292,15 @@ export class BurnsClient {
     })
 
     return validateSmithersUrlResponseSchema.parse(data)
+  }
+
+  async discoverLocalWorkflows(localPath: string): Promise<LocalWorkflowDiscoveryResponse> {
+    const data = await this.request<unknown>("/api/workspaces/discover-local-workflows", {
+      method: "POST",
+      body: JSON.stringify({ localPath }),
+    })
+
+    return localWorkflowDiscoveryResponseDtoSchema.parse(data)
   }
 
   async listAgentClis(): Promise<AgentCli[]> {

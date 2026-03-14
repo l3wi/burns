@@ -179,7 +179,10 @@ export function createWorkspace(input: CreateWorkspaceInput) {
   const workspace = createWorkspaceRecord(input, workspacePath)
   const persistedWorkspace = insertWorkspaceRow(workspace)
 
-  if (input.sourceType === "create" && input.runtimeMode === "burns-managed") {
+  if (
+    input.runtimeMode === "burns-managed" &&
+    Object.prototype.hasOwnProperty.call(input, "workflowTemplateIds")
+  ) {
     ensureDefaultWorkflowTemplates(persistedWorkspace.id, input.workflowTemplateIds)
   }
 

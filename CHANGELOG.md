@@ -21,6 +21,7 @@ The format follows Keep a Changelog and this project currently tracks SemVer-sty
 
 ### Changed
 
+- Changed the add-workspace flow to discover existing workflows for selected local repos and to make template workflow seeding an explicit toggle instead of an always-on default.
 - Changed Burns approvals to trigger a real Smithers resume after approval and stopped treating approved `waiting-approval` runs as locally finished before Smithers reports a terminal state.
 
 - Hardened canary/stable workflows with runtime smoke checks, strict artifact collection, and artifact integrity verification.

@@ -3,6 +3,7 @@ import path from "node:path"
 
 import type {
   AgentCli,
+  LocalWorkflowDiscoveryResponse,
   Workflow,
   WorkflowAuthoringStage,
   WorkflowDocument,
@@ -12,6 +13,7 @@ import type {
 import type { AgentCliEvent } from "@/agents/BaseCliAgent"
 import { defaultWorkflowTemplates } from "@/domain/workflows/templates"
 import { listInstalledAgentClis, runWorkflowGenerationAgent } from "@/services/agent-cli-service"
+import { isGitRepository } from "@/services/git-service"
 import { ensureWorkspaceSmithersLayout } from "@/services/workspace-layout"
 import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
@@ -433,6 +435,20 @@ function toUniqueWorkflowEntries(entries: WorkflowEntry[]) {
 
 function collectStandardWorkflowEntries(workspaceId: string, workspacePath: string) {
   const workflowRoot = getWorkflowRoot(workspaceId)
+
+  return collectStandardWorkflowEntriesFromRoot({
+    workspaceId,
+    workspacePath,
+    workflowRoot,
+  })
+}
+
+function collectStandardWorkflowEntriesFromRoot(params: {
+  workspaceId: string
+  workspacePath: string
+  workflowRoot: string
+}) {
+  const { workspaceId, workspacePath, workflowRoot } = params
 
   if (!existsSync(workflowRoot)) {
     return []
@@ -1033,27 +1049,58 @@ export function ensureDefaultWorkflowTemplates(workspaceId: string, templateIds?
   const workflowRoot = getWorkflowRoot(workspaceId)
   mkdirSync(workflowRoot, { recursive: true })
 
-  const hasWorkflowFiles = readdirSync(workflowRoot, { withFileTypes: true }).some((entry) => {
-    if (!entry.isDirectory()) {
-      return false
-    }
-
-    return existsSync(path.join(workflowRoot, entry.name, "workflow.tsx"))
-  })
-
-  if (hasWorkflowFiles) {
-    return
-  }
-
   const selectedTemplateIds = new Set(templateIds ?? [])
-  const templatesToWrite = templateIds?.length
-    ? defaultWorkflowTemplates.filter((template) => selectedTemplateIds.has(template.id))
-    : defaultWorkflowTemplates
+  const templatesToWrite =
+    templateIds === undefined
+      ? defaultWorkflowTemplates
+      : defaultWorkflowTemplates.filter((template) => selectedTemplateIds.has(template.id))
 
   for (const template of templatesToWrite) {
     const workflowDir = path.join(workflowRoot, template.id)
+    if (
+      existsSync(path.join(workflowDir, "workflow.tsx")) ||
+      existsSync(path.join(workflowDir, "workflow.ts"))
+    ) {
+      continue
+    }
+
     mkdirSync(workflowDir, { recursive: true })
     writeFileSync(path.join(workflowDir, "workflow.tsx"), `${template.source}\n`, "utf8")
+  }
+}
+
+export function discoverLocalWorkflows(localPath: string): LocalWorkflowDiscoveryResponse {
+  const trimmedLocalPath = localPath.trim()
+  if (!trimmedLocalPath || !path.isAbsolute(trimmedLocalPath)) {
+    throw new HttpError(400, "Local repository path must be absolute")
+  }
+
+  const resolvedLocalPath = path.resolve(trimmedLocalPath)
+
+  if (!existsSync(resolvedLocalPath)) {
+    throw new HttpError(400, `Local path does not exist: ${resolvedLocalPath}`)
+  }
+
+  if (!statSync(resolvedLocalPath).isDirectory()) {
+    throw new HttpError(400, `Local path is not a directory: ${resolvedLocalPath}`)
+  }
+
+  if (!isGitRepository(resolvedLocalPath)) {
+    throw new HttpError(400, `Local path is not a git repository: ${resolvedLocalPath}`)
+  }
+
+  const workflowRoot = path.join(resolvedLocalPath, ".smithers", "workflows")
+  const workflows = collectStandardWorkflowEntriesFromRoot({
+    workspaceId: "local-preview",
+    workspacePath: resolvedLocalPath,
+    workflowRoot,
+  })
+    .map(({ workspaceId: _workspaceId, status: _status, browseRootPath: _browseRootPath, directoryPath: _directoryPath, filePath: _filePath, ...workflow }) => workflow)
+    .sort((left, right) => left.name.localeCompare(right.name))
+
+  return {
+    localPath: resolvedLocalPath,
+    workflows,
   }
 }
 

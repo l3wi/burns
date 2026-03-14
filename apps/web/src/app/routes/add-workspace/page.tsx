@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
 
 import type { Combobox11Option } from "@/components/shadcn-studio/combobox/combobox-11"
 import { Combobox11 } from "@/components/shadcn-studio/combobox/combobox-11"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -28,6 +29,7 @@ import {
   validateWorkspaceName,
 } from "@/features/workspaces/add-workspace/lib/validation"
 import { useCreateWorkspace } from "@/features/workspaces/hooks/use-create-workspace"
+import { useDiscoverLocalWorkflows } from "@/features/workspaces/hooks/use-discover-local-workflows"
 import { burnsClient, isLocalhostBurnsApiUrl } from "@/lib/api/client"
 
 const workflowTemplateOptions = [
@@ -77,6 +79,7 @@ export function AddWorkspacePage() {
   const [localPath, setLocalPath] = useState("")
   const [targetFolder, setTargetFolder] = useState("burns-web-app")
   const [smithersBaseUrl, setSmithersBaseUrl] = useState("http://localhost:7331")
+  const [shouldAddTemplateWorkflows, setShouldAddTemplateWorkflows] = useState(false)
   const [selectedWorkflowTemplateIds, setSelectedWorkflowTemplateIds] = useState(
     workflowTemplateOptions.map((option) => option.value)
   )
@@ -104,6 +107,7 @@ export function AddWorkspacePage() {
   const isBurnsManaged = runtimeChoice === "burns-managed"
   const isSelfManaged = runtimeChoice === "self-managed"
   const selectedManagedSource = managedSourceChoice
+  const deferredLocalPath = useDeferredValue(localPath.trim())
 
   const nameError = validateWorkspaceName(name)
   const repoUrlError = selectedManagedSource === "clone" ? validateRepositoryUrl(repoUrl) : null
@@ -112,12 +116,24 @@ export function AddWorkspacePage() {
     isBurnsManaged && selectedManagedSource !== "local" ? validateTargetFolder(targetFolder) : null
   const selfManagedUrlError = isSelfManaged ? validateSmithersUrl(smithersBaseUrl) : null
 
+  const shouldDiscoverLocalWorkflows =
+    isBurnsManaged &&
+    selectedManagedSource === "local" &&
+    !localPathError &&
+    deferredLocalPath.length > 0
+  const localWorkflowDiscovery = useDiscoverLocalWorkflows(
+    shouldDiscoverLocalWorkflows ? deferredLocalPath : undefined,
+    shouldDiscoverLocalWorkflows
+  )
+  const localWorkflowDiscoveryError =
+    selectedManagedSource === "local" ? (localWorkflowDiscovery.error?.message ?? null) : null
   const finalFormError =
     nameError ||
     repoUrlError ||
     localPathError ||
     targetFolderError ||
-    selfManagedUrlError
+    selfManagedUrlError ||
+    localWorkflowDiscoveryError
 
   function getPrimaryButtonLabel() {
     if (step !== "final-config") {
@@ -140,7 +156,12 @@ export function AddWorkspacePage() {
       return managedSourceChoice !== null
     }
 
-    return !finalFormError && !createWorkspace.isPending && !isValidatingSmithersUrl
+    return (
+      !finalFormError &&
+      !createWorkspace.isPending &&
+      !isValidatingSmithersUrl &&
+      !(selectedManagedSource === "local" && localWorkflowDiscovery.isPending)
+    )
   }
 
   function handleBack() {
@@ -211,7 +232,9 @@ export function AddWorkspacePage() {
             runtimeMode: "burns-managed",
             sourceType: "local",
             localPath: trimmedLocalPath,
-            workflowTemplateIds: selectedWorkflowTemplateIds,
+            ...(shouldAddTemplateWorkflows
+              ? { workflowTemplateIds: selectedWorkflowTemplateIds }
+              : {}),
           }
         : selectedManagedSource === "clone"
           ? {
@@ -220,14 +243,18 @@ export function AddWorkspacePage() {
               sourceType: "clone",
               repoUrl: trimmedRepoUrl,
               targetFolder: trimmedTargetFolder || fallbackTargetFolder,
-              workflowTemplateIds: selectedWorkflowTemplateIds,
+              ...(shouldAddTemplateWorkflows
+                ? { workflowTemplateIds: selectedWorkflowTemplateIds }
+                : {}),
             }
           : {
               name: trimmedName,
               runtimeMode: "burns-managed",
               sourceType: "create",
               targetFolder: trimmedTargetFolder || fallbackTargetFolder,
-              workflowTemplateIds: selectedWorkflowTemplateIds,
+              ...(shouldAddTemplateWorkflows
+                ? { workflowTemplateIds: selectedWorkflowTemplateIds }
+                : {}),
             }
     )
 
@@ -372,6 +399,43 @@ export function AddWorkspacePage() {
                 </FormRow>
               ) : null}
 
+              {isBurnsManaged && selectedManagedSource === "local" && deferredLocalPath && !localPathError ? (
+                <FormRow
+                  label="Existing workflows"
+                  description="Burns checks .smithers/workflows in the selected repository before adding it."
+                >
+                  {localWorkflowDiscovery.isPending ? (
+                    <p className="text-sm text-muted-foreground">Scanning repository workflows...</p>
+                  ) : localWorkflowDiscovery.error ? (
+                    <p className="text-sm text-destructive">{localWorkflowDiscovery.error.message}</p>
+                  ) : localWorkflowDiscovery.data?.workflows.length ? (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary">
+                          {localWorkflowDiscovery.data.workflows.length} workflow
+                          {localWorkflowDiscovery.data.workflows.length === 1 ? "" : "s"}
+                        </Badge>
+                      </div>
+                      <div className="rounded-lg border">
+                        {localWorkflowDiscovery.data.workflows.map((workflow) => (
+                          <div
+                            key={workflow.relativePath}
+                            className="flex flex-col gap-1 border-b px-3 py-2 last:border-b-0"
+                          >
+                            <p className="text-sm font-medium">{workflow.name}</p>
+                            <p className="text-xs text-muted-foreground">{workflow.relativePath}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No existing Burns workflows were found in this repository.
+                    </p>
+                  )}
+                </FormRow>
+              ) : null}
+
               {isBurnsManaged && selectedManagedSource !== "local" ? (
                 <FormRow
                   label="Target folder"
@@ -393,19 +457,30 @@ export function AddWorkspacePage() {
 
               {isBurnsManaged ? (
                 <FormRow
-                  label="Workflows"
-                  description="Select templates to pre-seed in .smithers/workflows."
+                  label="Template workflows"
+                  description="Turn this on to add selected templates into .smithers/workflows."
                 >
-                  <Combobox11
-                    className="max-w-full"
-                    label=""
-                    placeholder="Select workflow templates"
-                    searchPlaceholder="Search workflow template..."
-                    emptyLabel="No workflow template found."
-                    options={workflowTemplateOptions}
-                    selectedValues={selectedWorkflowTemplateIds}
-                    onChange={setSelectedWorkflowTemplateIds}
-                  />
+                  <label className="flex items-center gap-3 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={shouldAddTemplateWorkflows}
+                      onChange={(event) => setShouldAddTemplateWorkflows(event.target.checked)}
+                      className="size-4 rounded border border-input"
+                    />
+                    Add template workflows
+                  </label>
+                  {shouldAddTemplateWorkflows ? (
+                    <Combobox11
+                      className="max-w-full"
+                      label=""
+                      placeholder="Select workflow templates"
+                      searchPlaceholder="Search workflow template..."
+                      emptyLabel="No workflow template found."
+                      options={workflowTemplateOptions}
+                      selectedValues={selectedWorkflowTemplateIds}
+                      onChange={setSelectedWorkflowTemplateIds}
+                    />
+                  ) : null}
                 </FormRow>
               ) : null}
             </>

@@ -73,6 +73,18 @@ export const workspaceSmithersRuntimeConfigSchema = z.object({
   canAutoRestart: z.boolean(),
 })
 
+export const localWorkflowDiscoveryItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  relativePath: z.string(),
+  updatedAt: z.string().optional(),
+})
+
+export const localWorkflowDiscoveryResponseSchema = z.object({
+  localPath: z.string(),
+  workflows: z.array(localWorkflowDiscoveryItemSchema),
+})
+
 export const deleteWorkspaceInputSchema = z.object({
   mode: workspaceDeleteModeSchema,
 })
@@ -125,6 +137,8 @@ export type WorkspaceServerStatus = z.infer<typeof workspaceServerStatusSchema>
 export type WorkspaceSmithersManagementMode = z.infer<typeof workspaceSmithersManagementModeSchema>
 export type WorkspaceSmithersBaseUrlSource = z.infer<typeof workspaceSmithersBaseUrlSourceSchema>
 export type WorkspaceSmithersRuntimeConfig = z.infer<typeof workspaceSmithersRuntimeConfigSchema>
+export type LocalWorkflowDiscoveryItem = z.infer<typeof localWorkflowDiscoveryItemSchema>
+export type LocalWorkflowDiscoveryResponse = z.infer<typeof localWorkflowDiscoveryResponseSchema>
 export type CreateWorkspaceInput = z.infer<typeof createWorkspaceInputSchema>
 export type DeleteWorkspaceInput = z.infer<typeof deleteWorkspaceInputSchema>
 export type DeleteWorkspaceResult = z.infer<typeof deleteWorkspaceResultSchema>
