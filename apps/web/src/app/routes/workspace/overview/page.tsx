@@ -79,6 +79,22 @@ function safeParseRunInput(rawValue: string) {
   }
 }
 
+function getWorkflowPathRelativeToWorkflowsFolder(relativePath: string) {
+  const normalizedPath = relativePath.replaceAll("\\", "/")
+  const workflowsMarker = "/workflows/"
+
+  if (normalizedPath.startsWith("workflows/")) {
+    return normalizedPath.slice("workflows/".length)
+  }
+
+  const workflowsIndex = normalizedPath.lastIndexOf(workflowsMarker)
+  if (workflowsIndex === -1) {
+    return normalizedPath
+  }
+
+  return normalizedPath.slice(workflowsIndex + workflowsMarker.length)
+}
+
 export function WorkspaceOverviewPage() {
   const navigate = useNavigate()
   const { workspaceId } = useActiveWorkspace()
@@ -138,9 +154,14 @@ export function WorkspaceOverviewPage() {
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-x-hidden">
       <div className="grid min-h-0 flex-1 gap-4 p-6 lg:grid-cols-2">
         <div className="flex min-h-0 flex-col gap-4">
-          <Card size="sm">
+          <Card size="sm" className="shrink-0">
             <CardHeader>
-              <CardTitle>Launch run</CardTitle>
+              <div className="flex items-start justify-between gap-3">
+                <CardTitle>Launch run</CardTitle>
+                {fallbackNotice && !launchFieldsQuery.isLoading && !isInferredMode ? (
+                  <p className="max-w-64 text-right text-xs text-muted-foreground">{fallbackNotice}</p>
+                ) : null}
+              </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {workflows.length === 0 ? (
@@ -165,10 +186,6 @@ export function WorkspaceOverviewPage() {
                     </SelectContent>
                   </Select>
 
-                  {selectedWorkflow ? (
-                    <p className="text-xs text-muted-foreground">{selectedWorkflow.relativePath}</p>
-                  ) : null}
-
                   {launchFieldsQuery.isLoading ? (
                     <p className="text-sm text-muted-foreground">Detecting launch inputs...</p>
                   ) : isInferredMode ? (
@@ -191,9 +208,6 @@ export function WorkspaceOverviewPage() {
                     </div>
                   ) : (
                     <div className="flex flex-col gap-2">
-                      {fallbackNotice ? (
-                        <p className="text-xs text-muted-foreground">{fallbackNotice}</p>
-                      ) : null}
                       <Textarea
                         aria-label="Run input JSON object"
                         className="min-h-24 font-mono text-xs"
@@ -227,32 +241,29 @@ export function WorkspaceOverviewPage() {
             </CardContent>
           </Card>
 
-          <Card className="min-h-0">
+          <Card className="min-h-0 flex-1 overflow-hidden">
             <CardHeader>
               <CardTitle>Workflows</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="min-h-0 overflow-y-auto pr-1">
               {workflows.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No workflows found for this workspace.</p>
               ) : (
-                <div className="grid gap-3">
+                <div className="grid gap-2">
                   {workflows.map((workflow) => (
                     <button
                       key={workflow.id}
                       type="button"
                       onClick={() => navigate(`/w/${workspaceId}/workflows/${workflow.id}`)}
-                      className="rounded-xl border p-4 text-left transition-colors hover:bg-muted"
+                      className="rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted"
                     >
-                      <div className="mb-3 flex items-start justify-between gap-2">
+                      <div className="flex items-start justify-between gap-3">
                         <p className="font-medium">{workflow.name}</p>
-                        <Badge variant="outline">{workflow.status}</Badge>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">{workflow.relativePath}</p>
                         <p className="text-xs text-muted-foreground">
-                          Updated {formatTimestamp(workflow.updatedAt)}
+                          {getWorkflowPathRelativeToWorkflowsFolder(workflow.relativePath)}
                         </p>
                       </div>
+                      <p className="mt-1 text-xs text-muted-foreground">Updated {formatTimestamp(workflow.updatedAt)}</p>
                     </button>
                   ))}
                 </div>
@@ -294,7 +305,7 @@ export function WorkspaceOverviewPage() {
                   >
                     <div className="flex flex-col gap-1">
                       <p className="font-medium">
-                        {run.id} - {run.workflowName}
+                        {run.workflowName} - {run.id}
                       </p>
                       <p className="text-sm text-muted-foreground">
                         started {formatTimestamp(run.startedAt)}

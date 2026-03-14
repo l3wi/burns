@@ -27,3 +27,7 @@ The format follows Keep a Changelog and this project currently tracks SemVer-sty
 - Moved repo-local workflow and Smithers state storage from `.burns`/legacy `.mr-burns` into `.smithers`, with one-time migration of legacy workspace directories and top-level `smithers.db*` files.
 - Changed default workspace creation root to `~/Documents/Burns`, while Burns app state now defaults to `~/.burns` for direct daemon/web runs and platform app-data locations in desktop mode.
 - Managed workspace runs now create a workspace-local `node_modules` link back to the Burns monorepo so Smithers workflow imports resolve reliably under Bun.
+- Reworked the run detail layout so the event timeline stays pinned to the top and the node list/output panes fill the remaining page height.
+- Added a run approval workflow in the web UI with pending approval cards on run detail, workspace approvals, and the global inbox, and fixed node output rendering for plain-text Smithers outputs.
+- Changed the run detail page to show node cards and outputs in chronological execution order, with pending approvals pinned to the end and per-node start/finish checkpoints.
+- Removed the dedicated workspace approvals page and changed the global inbox to link operators directly into the relevant run detail for approval decisions.

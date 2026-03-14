@@ -258,6 +258,22 @@ const defaultTemplateById = new Map<string, string>(
 )
 
 const MAX_WORKFLOW_AUTHORING_ATTEMPTS = 2
+const MAX_DISCOVERED_WORKFLOW_FILE_SIZE_BYTES = 512 * 1024
+const WORKFLOW_SOURCE_EXTENSIONS = new Set([".ts", ".tsx"])
+const STANDARD_WORKFLOW_RELATIVE_PATH_PATTERN = /^\.smithers\/workflows\/([^/]+)\/workflow\.(?:tsx|ts)$/
+const IGNORED_WORKFLOW_DISCOVERY_DIRECTORIES = new Set([
+  ".git",
+  ".jj",
+  ".next",
+  ".smithers",
+  ".turbo",
+  ".vscode",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "tmp",
+])
 
 type WorkflowAuthoringProgressEvent = {
   stage: WorkflowAuthoringStage
@@ -269,15 +285,280 @@ type WorkflowAuthoringProgressEvent = {
 type WorkflowAuthoringProgressHandler = (event: WorkflowAuthoringProgressEvent) => void
 type WorkflowAuthoringOutputHandler = (event: { stream: "stdout" | "stderr"; chunk: string }) => void
 type WorkflowAuthoringAgentEventHandler = (event: AgentCliEvent) => void
+type WorkflowEntry = Workflow & {
+  browseRootPath: string
+  directoryPath: string
+  filePath: string
+}
 
-function getWorkflowRoot(workspaceId: string) {
+function assertWorkspaceRecord(workspaceId: string) {
   const workspace = getWorkspace(workspaceId)
 
   if (!workspace) {
     throw new HttpError(404, `Workspace not found: ${workspaceId}`)
   }
 
-  return ensureWorkspaceSmithersLayout(workspace.path).workflowRoot
+  return workspace
+}
+
+function assertWorkflowMutationsAllowed(workspaceId: string) {
+  const workspace = assertWorkspaceRecord(workspaceId)
+
+  if (workspace.runtimeMode === "self-managed") {
+    throw new HttpError(403, "Self-managed workflows are read-only in Burns.")
+  }
+
+  return workspace
+}
+
+function getWorkflowRoot(workspaceId: string) {
+  return ensureWorkspaceSmithersLayout(assertWorkspaceRecord(workspaceId).path).workflowRoot
+}
+
+function normalizeFilesystemPath(value: string) {
+  return value.replaceAll("\\", "/").replace(/^\.?\//, "")
+}
+
+function readWorkflowCandidateSource(filePath: string) {
+  const fileStats = statSync(filePath)
+  if (!fileStats.isFile() || fileStats.size > MAX_DISCOVERED_WORKFLOW_FILE_SIZE_BYTES) {
+    return null
+  }
+
+  return readFileSync(filePath, "utf8")
+}
+
+function looksLikeSmithersWorkflowSource(filePath: string, source: string) {
+  if (!/from\s+["']smithers-orchestrator["']/.test(source)) {
+    return false
+  }
+
+  if (/export\s+default\s+smithers\s*\(/.test(source)) {
+    return true
+  }
+
+  const fileName = path.basename(filePath).toLowerCase()
+  return (fileName === "workflow.tsx" || fileName === "workflow.ts") && /<Workflow\b/.test(source)
+}
+
+function extractWorkflowDisplayName(filePath: string, source: string) {
+  const workflowNameMatch = source.match(/<Workflow\b[^>]*\bname\s*=\s*["']([^"']+)["']/)
+  if (workflowNameMatch?.[1]) {
+    return workflowNameMatch[1]
+  }
+
+  const fileStem = path.basename(filePath, path.extname(filePath))
+  if (fileStem !== "workflow") {
+    return fileStem
+  }
+
+  return path.basename(path.dirname(filePath)) || "workflow"
+}
+
+function buildWorkflowId(relativePath: string) {
+  const normalizedRelativePath = normalizeFilesystemPath(relativePath)
+  const standardMatch = normalizedRelativePath.match(STANDARD_WORKFLOW_RELATIVE_PATH_PATTERN)
+  if (standardMatch?.[1]) {
+    return standardMatch[1]
+  }
+
+  const withoutExtension = normalizedRelativePath.replace(/\.(tsx|ts)$/i, "")
+  const withoutWorkflowStem = withoutExtension.endsWith("/workflow")
+    ? withoutExtension.slice(0, -"/workflow".length)
+    : withoutExtension
+  const candidateId = slugify(withoutWorkflowStem.replaceAll("/", "-"))
+
+  return candidateId || slugify(path.basename(withoutExtension)) || "workflow"
+}
+
+function buildWorkflowEntry(params: {
+  workspaceId: string
+  workspacePath: string
+  filePath: string
+  source: string
+  name?: string
+}): WorkflowEntry {
+  const relativePath = normalizeFilesystemPath(path.relative(params.workspacePath, params.filePath))
+  const fileName = path.basename(params.filePath)
+  const browseRootPath =
+    fileName === "workflow.tsx" || fileName === "workflow.ts"
+      ? path.dirname(params.filePath)
+      : params.filePath
+  const stats = statSync(params.filePath)
+
+  return {
+    id: buildWorkflowId(relativePath),
+    workspaceId: params.workspaceId,
+    name: params.name ?? extractWorkflowDisplayName(params.filePath, params.source),
+    relativePath,
+    status: inferWorkflowStatus(buildWorkflowId(relativePath)),
+    updatedAt: stats.mtime.toISOString(),
+    browseRootPath,
+    directoryPath: path.dirname(params.filePath),
+    filePath: params.filePath,
+  }
+}
+
+function toUniqueWorkflowEntries(entries: WorkflowEntry[]) {
+  const seenPaths = new Set<string>()
+  const uniqueEntries: WorkflowEntry[] = []
+
+  for (const entry of entries) {
+    if (seenPaths.has(entry.filePath)) {
+      continue
+    }
+
+    seenPaths.add(entry.filePath)
+    uniqueEntries.push(entry)
+  }
+
+  const idCounts = new Map<string, number>()
+
+  return uniqueEntries
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath))
+    .map((entry) => {
+      const nextCount = (idCounts.get(entry.id) ?? 0) + 1
+      idCounts.set(entry.id, nextCount)
+
+      if (nextCount === 1) {
+        return entry
+      }
+
+      return {
+        ...entry,
+        id: `${entry.id}-${nextCount}`,
+      }
+    })
+}
+
+function collectStandardWorkflowEntries(workspaceId: string, workspacePath: string) {
+  const workflowRoot = getWorkflowRoot(workspaceId)
+
+  if (!existsSync(workflowRoot)) {
+    return []
+  }
+
+  const entries: WorkflowEntry[] = []
+
+  for (const directoryEntry of readdirSync(workflowRoot, { withFileTypes: true })) {
+    if (!directoryEntry.isDirectory()) {
+      continue
+    }
+
+    for (const fileName of ["workflow.tsx", "workflow.ts"] as const) {
+      const filePath = path.join(workflowRoot, directoryEntry.name, fileName)
+      if (!existsSync(filePath)) {
+        continue
+      }
+
+      const source = readWorkflowCandidateSource(filePath)
+      if (!source) {
+        continue
+      }
+
+      entries.push(
+        buildWorkflowEntry({
+          workspaceId,
+          workspacePath,
+          filePath,
+          source,
+          name: directoryEntry.name,
+        })
+      )
+      break
+    }
+  }
+
+  return entries
+}
+
+function shouldIgnoreWorkflowDiscoveryDirectory(directoryName: string) {
+  return IGNORED_WORKFLOW_DISCOVERY_DIRECTORIES.has(directoryName)
+}
+
+function discoverSelfManagedWorkflowEntries(workspaceId: string, workspacePath: string) {
+  const discoveredEntries: WorkflowEntry[] = []
+
+  const walk = (directoryPath: string) => {
+    const directoryEntries = readdirSync(directoryPath, { withFileTypes: true }).sort((left, right) =>
+      left.name.localeCompare(right.name)
+    )
+
+    for (const directoryEntry of directoryEntries) {
+      const entryPath = path.join(directoryPath, directoryEntry.name)
+
+      if (directoryEntry.isDirectory()) {
+        if (shouldIgnoreWorkflowDiscoveryDirectory(directoryEntry.name)) {
+          continue
+        }
+
+        walk(entryPath)
+        continue
+      }
+
+      if (!directoryEntry.isFile()) {
+        continue
+      }
+
+      if (!WORKFLOW_SOURCE_EXTENSIONS.has(path.extname(directoryEntry.name))) {
+        continue
+      }
+
+      const source = readWorkflowCandidateSource(entryPath)
+      if (!source || !looksLikeSmithersWorkflowSource(entryPath, source)) {
+        continue
+      }
+
+      discoveredEntries.push(
+        buildWorkflowEntry({
+          workspaceId,
+          workspacePath,
+          filePath: entryPath,
+          source,
+        })
+      )
+    }
+  }
+
+  walk(workspacePath)
+
+  return discoveredEntries
+}
+
+function listWorkflowEntries(workspaceId: string) {
+  const workspace = assertWorkspaceRecord(workspaceId)
+  const standardEntries = collectStandardWorkflowEntries(workspaceId, workspace.path)
+
+  if (workspace.runtimeMode !== "self-managed") {
+    return toUniqueWorkflowEntries(standardEntries)
+  }
+
+  const discoveredEntries = discoverSelfManagedWorkflowEntries(workspaceId, workspace.path)
+  return toUniqueWorkflowEntries([...standardEntries, ...discoveredEntries])
+}
+
+function resolveWorkflowEntry(workspaceId: string, workflowId: string) {
+  const normalizedWorkflowId = normalizeFilesystemPath(workflowId)
+  const entries = listWorkflowEntries(workspaceId)
+
+  const matchedEntry =
+    entries.find((entry) => entry.id === workflowId) ??
+    entries.find((entry) => entry.name === workflowId) ??
+    entries.find((entry) => normalizeFilesystemPath(entry.relativePath) === normalizedWorkflowId)
+
+  if (!matchedEntry) {
+    throw new HttpError(404, `Workflow not found: ${workflowId}`)
+  }
+
+  return matchedEntry
+}
+
+export function findWorkflowEntryByFilePath(workspaceId: string, workflowFilePath: string) {
+  const normalizedWorkflowFilePath = path.resolve(workflowFilePath)
+  return (
+    listWorkflowEntries(workspaceId).find((entry) => path.resolve(entry.filePath) === normalizedWorkflowFilePath) ??
+    null
+  )
 }
 
 function inferWorkflowStatus(workflowId: string): Workflow["status"] {
@@ -533,28 +814,27 @@ const workflowAuthorSystemPrompt =
   "You author Smithers workflow files. Write the workflow entry file and any necessary supporting files to disk, then return a short success confirmation."
 
 function getWorkflowFilePath(workspaceId: string, workflowId: string) {
-  const workflowRoot = getWorkflowRoot(workspaceId)
-  const candidateExtensions = ["workflow.tsx", "workflow.ts"]
+  return resolveWorkflowEntry(workspaceId, workflowId).filePath
+}
 
-  for (const candidate of candidateExtensions) {
-    const filePath = path.join(workflowRoot, workflowId, candidate)
-    if (existsSync(filePath)) {
-      return filePath
-    }
-  }
-
-  throw new HttpError(404, `Workflow not found: ${workflowId}`)
+export function resolveWorkflowEntryFilePath(workspaceId: string, workflowId: string) {
+  return getWorkflowFilePath(workspaceId, workflowId)
 }
 
 export function getWorkflowDirectoryPath(workspaceId: string, workflowId: string) {
-  const workflowRoot = getWorkflowRoot(workspaceId)
-  const workflowDirectoryPath = path.join(workflowRoot, workflowId)
+  return resolveWorkflowEntry(workspaceId, workflowId).directoryPath
+}
 
-  if (!existsSync(workflowDirectoryPath) || !statSync(workflowDirectoryPath).isDirectory()) {
-    throw new HttpError(404, `Workflow not found: ${workflowId}`)
+function getWorkflowDirectoryPathForWrite(workspaceId: string, workflowId: string) {
+  try {
+    return getWorkflowDirectoryPath(workspaceId, workflowId)
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 404) {
+      return path.join(getWorkflowRoot(workspaceId), workflowId)
+    }
+
+    throw error
   }
-
-  return workflowDirectoryPath
 }
 
 function normalizeWorkflowFilePath(inputPath: string) {
@@ -605,20 +885,6 @@ function resolveWorkflowFileOutputPath(workflowDirectoryPath: string, inputPath:
 
 function isWorkflowSourceFilePath(filePath: string) {
   return filePath === "workflow.tsx" || filePath === "workflow.ts"
-}
-
-function mapWorkflowFile(workspaceId: string, workflowId: string, filePath: string): Workflow {
-  const relativePath = path.relative(getWorkspace(workspaceId)!.path, filePath)
-  const stats = statSync(filePath)
-
-  return {
-    id: workflowId,
-    workspaceId,
-    name: workflowId,
-    relativePath,
-    status: inferWorkflowStatus(workflowId),
-    updatedAt: stats.mtime.toISOString(),
-  }
 }
 
 function toFieldLabel(key: string) {
@@ -737,7 +1003,7 @@ export function getWorkflowLaunchFields(
       mode: "fallback",
       entryTaskId,
       fields: [],
-      message: "Workflow reads ctx.input directly. Provide a JSON object for the run input.",
+      message: "Enter run input as JSON.",
     }
   }
 
@@ -792,38 +1058,37 @@ export function ensureDefaultWorkflowTemplates(workspaceId: string, templateIds?
 }
 
 export function listWorkflows(workspaceId: string) {
-  const workflowRoot = getWorkflowRoot(workspaceId)
-
-  if (!existsSync(workflowRoot)) {
-    return []
-  }
-
-  return readdirSync(workflowRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => {
-      try {
-        const filePath = getWorkflowFilePath(workspaceId, entry.name)
-        return mapWorkflowFile(workspaceId, entry.name, filePath)
-      } catch {
-        return null
-      }
-    })
-    .filter((workflow): workflow is Workflow => workflow !== null)
+  return listWorkflowEntries(workspaceId)
+    .map(({ browseRootPath: _browseRootPath, directoryPath: _directoryPath, filePath: _filePath, ...workflow }) => workflow)
     .sort((left, right) => left.name.localeCompare(right.name))
 }
 
 export function getWorkflow(workspaceId: string, workflowId: string): WorkflowDocument {
-  const filePath = getWorkflowFilePath(workspaceId, workflowId)
+  const workflowEntry = resolveWorkflowEntry(workspaceId, workflowId)
+  const {
+    browseRootPath: _browseRootPath,
+    directoryPath: _directoryPath,
+    filePath,
+    ...workflow
+  } = workflowEntry
 
   return {
-    ...mapWorkflowFile(workspaceId, workflowId, filePath),
+    ...workflow,
     source: readFileSync(filePath, "utf8"),
   }
 }
 
 export function listWorkflowFiles(workspaceId: string, workflowId: string) {
-  const workflowDirectoryPath = getWorkflowDirectoryPath(workspaceId, workflowId)
+  const workflowEntry = resolveWorkflowEntry(workspaceId, workflowId)
+  const workflowDirectoryPath = workflowEntry.browseRootPath
   const files: { path: string }[] = []
+
+  if (statSync(workflowDirectoryPath).isFile()) {
+    return {
+      workflowId: workflowEntry.id,
+      files: [{ path: path.basename(workflowEntry.filePath) }],
+    }
+  }
 
   const walk = (directoryPath: string) => {
     const entries = readdirSync(directoryPath, { withFileTypes: true }).sort((left, right) =>
@@ -850,25 +1115,41 @@ export function listWorkflowFiles(workspaceId: string, workflowId: string) {
   walk(workflowDirectoryPath)
 
   return {
-    workflowId,
+    workflowId: workflowEntry.id,
     files,
   }
 }
 
 export function getWorkflowFile(workspaceId: string, workflowId: string, filePath: string) {
-  const workflowDirectoryPath = getWorkflowDirectoryPath(workspaceId, workflowId)
-  const { normalizedPath, resolvedPath } = resolveWorkflowFilePath(workflowDirectoryPath, filePath)
+  const workflowEntry = resolveWorkflowEntry(workspaceId, workflowId)
+  const browseRootPath = workflowEntry.browseRootPath
+
+  if (statSync(browseRootPath).isFile()) {
+    const normalizedPath = normalizeWorkflowFilePath(filePath)
+    const expectedPath = path.basename(workflowEntry.filePath)
+    if (normalizedPath !== expectedPath) {
+      throw new HttpError(404, `Workflow file not found: ${normalizedPath}`)
+    }
+
+    return {
+      workflowId: workflowEntry.id,
+      path: normalizedPath,
+      source: readFileSync(workflowEntry.filePath, "utf8"),
+    }
+  }
+
+  const { normalizedPath, resolvedPath } = resolveWorkflowFilePath(browseRootPath, filePath)
 
   return {
-    workflowId,
+    workflowId: workflowEntry.id,
     path: normalizedPath,
     source: readFileSync(resolvedPath, "utf8"),
   }
 }
 
 export function saveWorkflow(workspaceId: string, workflowId: string, source: string) {
-  const workflowRoot = getWorkflowRoot(workspaceId)
-  const workflowDir = path.join(workflowRoot, workflowId)
+  assertWorkflowMutationsAllowed(workspaceId)
+  const workflowDir = getWorkflowDirectoryPathForWrite(workspaceId, workflowId)
   const filePath = existsSync(path.join(workflowDir, "workflow.tsx"))
     ? path.join(workflowDir, "workflow.tsx")
     : existsSync(path.join(workflowDir, "workflow.ts"))
@@ -888,7 +1169,8 @@ export function saveWorkflowFile(
   filePath: string,
   source: string
 ) {
-  const workflowDirectoryPath = getWorkflowDirectoryPath(workspaceId, workflowId)
+  assertWorkflowMutationsAllowed(workspaceId)
+  const workflowDirectoryPath = getWorkflowDirectoryPathForWrite(workspaceId, workflowId)
   const { normalizedPath, resolvedPath } = resolveWorkflowFileOutputPath(workflowDirectoryPath, filePath)
   const nextSource = isWorkflowSourceFilePath(normalizedPath)
     ? normalizeAndValidateWorkflowSource(source)
@@ -905,8 +1187,8 @@ export function saveWorkflowFile(
 }
 
 export function deleteWorkflow(workspaceId: string, workflowId: string) {
-  const workflowRoot = getWorkflowRoot(workspaceId)
-  const workflowDir = path.join(workflowRoot, workflowId)
+  assertWorkflowMutationsAllowed(workspaceId)
+  const workflowDir = getWorkflowDirectoryPath(workspaceId, workflowId)
 
   if (!existsSync(workflowDir)) {
     throw new HttpError(404, `Workflow not found: ${workflowId}`)
@@ -1062,11 +1344,7 @@ export async function generateWorkflowFromPrompt(params: {
   onAgentOutput?: WorkflowAuthoringOutputHandler
   onAgentEvent?: WorkflowAuthoringAgentEventHandler
 }) {
-  const workspace = getWorkspace(params.workspaceId)
-
-  if (!workspace) {
-    throw new HttpError(404, `Workspace not found: ${params.workspaceId}`)
-  }
+  const workspace = assertWorkflowMutationsAllowed(params.workspaceId)
 
   const availableAgentClis = listInstalledAgentClis()
 
@@ -1130,11 +1408,7 @@ export async function editWorkflowFromPrompt(params: {
   onAgentOutput?: WorkflowAuthoringOutputHandler
   onAgentEvent?: WorkflowAuthoringAgentEventHandler
 }) {
-  const workspace = getWorkspace(params.workspaceId)
-
-  if (!workspace) {
-    throw new HttpError(404, `Workspace not found: ${params.workspaceId}`)
-  }
+  const workspace = assertWorkflowMutationsAllowed(params.workspaceId)
 
   const availableAgentClis = listInstalledAgentClis()
 

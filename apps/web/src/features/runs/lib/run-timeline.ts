@@ -213,11 +213,17 @@ function repairMojibake(value: string) {
 
 function normalizeOutputTextChunk(value: string) {
   const agentOnly = extractAgentOutputFromChunk(value)
-  if (!agentOnly) {
+  const trimmedValue = value.trim()
+  if (!agentOnly && trimmedValue.startsWith("exec\n")) {
     return ""
   }
 
-  const maybeDecoded = maybeDecodeDoubleEscapedText(agentOnly)
+  const textToDisplay = agentOnly || trimmedValue
+  if (!textToDisplay) {
+    return ""
+  }
+
+  const maybeDecoded = maybeDecodeDoubleEscapedText(textToDisplay)
   return repairMojibake(maybeDecoded)
 }
 
@@ -290,7 +296,7 @@ export function buildNodeRunTimeline(events: RunEvent[]) {
         status: "running",
         firstSeq: event.seq,
         lastSeq: event.seq,
-        startedAt: undefined,
+        startedAt: event.timestamp,
         finishedAt: undefined,
         outputText: "",
         hasStarted: false,
@@ -303,6 +309,7 @@ export function buildNodeRunTimeline(events: RunEvent[]) {
 
     nodeRun.firstSeq = Math.min(nodeRun.firstSeq, event.seq)
     nodeRun.lastSeq = Math.max(nodeRun.lastSeq, event.seq)
+    nodeRun.startedAt = nodeRun.startedAt ?? event.timestamp
 
     if (event.type === "NodeStarted") {
       nodeRun.hasStarted = true

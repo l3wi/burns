@@ -11,7 +11,6 @@ import { SettingsPage } from "@/app/routes/settings/page"
 import { WorkflowDetailPage } from "@/app/routes/workflows/detail/page"
 import { NewWorkflowPage } from "@/app/routes/workflows/new/page"
 import { WorkflowsPage } from "@/app/routes/workflows/page"
-import { WorkspaceApprovalsPage } from "@/app/routes/workspace/approvals/page"
 import { WorkspaceOverviewPage } from "@/app/routes/workspace/overview/page"
 import { WorkspaceRunDetailPage } from "@/app/routes/workspace/runs/detail/page"
 import { WorkspaceRunsPage } from "@/app/routes/workspace/runs/page"
@@ -65,10 +64,6 @@ export const router = createBrowserRouter([
           {
             path: "runs/:runId",
             element: <WorkspaceRunDetailPage />,
-          },
-          {
-            path: "approvals",
-            element: <WorkspaceApprovalsPage />,
           },
           {
             path: "settings",

@@ -159,4 +159,59 @@ exec
 
     expect(timeline[0]?.outputText).toBe("")
   })
+
+  it("keeps plain prose node output when no exec transcript markers are present", () => {
+    const proseOutput = "Validation passed.\n\nEverything looks correct."
+
+    const timeline = buildNodeRunTimeline([
+      makeEvent({
+        seq: 1,
+        runId: "run-5",
+        type: "NodeOutput",
+        timestamp: "2026-03-13T16:07:04.431Z",
+        nodeId: "validate",
+        rawPayload: {
+          iteration: 0,
+          attempt: 1,
+          text: proseOutput,
+        },
+      }),
+    ])
+
+    expect(timeline[0]?.outputText).toBe(proseOutput)
+  })
+
+  it("uses the first observed node event as the start timestamp when NodeStarted is missing", () => {
+    const timeline = buildNodeRunTimeline([
+      makeEvent({
+        seq: 2,
+        runId: "run-6",
+        type: "ApprovalRequested",
+        timestamp: "2026-03-13T15:49:06.511Z",
+        nodeId: "approve",
+        rawPayload: {
+          iteration: 0,
+          nodeId: "approve",
+        },
+      }),
+      makeEvent({
+        seq: 3,
+        runId: "run-6",
+        type: "NodeWaitingApproval",
+        timestamp: "2026-03-13T15:49:06.511Z",
+        nodeId: "approve",
+        rawPayload: {
+          iteration: 0,
+          nodeId: "approve",
+        },
+      }),
+    ])
+
+    expect(timeline[0]).toMatchObject({
+      nodeId: "approve",
+      startedAt: "2026-03-13T15:49:06.511Z",
+      finishedAt: undefined,
+      status: "running",
+    })
+  })
 })

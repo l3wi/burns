@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import {
+  extractStructuredOutputProseText,
   parseInlineCodeSegments,
   parseStructuredOutputCards,
   parseStructuredOutputJsonObjects,
@@ -72,6 +73,21 @@ codex
   it("returns no cards when output has no JSON objects", () => {
     const cards = parseStructuredOutputCards("plain text only")
     expect(cards).toHaveLength(0)
+  })
+
+  it("extracts prose text while removing trailing structured json blocks", () => {
+    const prose = extractStructuredOutputProseText(`Intro text
+
+\`\`\`json
+{"summary":"One","steps":["a","b"]}
+\`\`\``)
+
+    expect(prose).toBe("Intro text")
+  })
+
+  it("returns empty prose when output is only structured json", () => {
+    const prose = extractStructuredOutputProseText('{"summary":"Only structured"}')
+    expect(prose).toBe("")
   })
 
   it("hides sections for null, empty strings, and empty arrays", () => {

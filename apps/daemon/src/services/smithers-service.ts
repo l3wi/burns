@@ -1,8 +1,8 @@
 import path from "node:path"
-import { existsSync } from "node:fs"
 
 import type { CancelRunInput, ResumeRunInput, Run, StartRunInput } from "@burns/shared"
 
+import { listApprovalRowsByWorkspace } from "@/db/repositories/approval-repository"
 import {
   cancelSmithersRun,
   createSmithersRun,
@@ -13,8 +13,11 @@ import {
 } from "@/integrations/smithers/http-client"
 import { ensureWorkspaceSmithersBaseUrl } from "@/services/smithers-instance-service"
 import { ensureWorkspaceSmithersLayout } from "@/services/workspace-layout"
-import { getWorkspaceWorkflowRootPath } from "@/services/workspace-layout"
-import { repairLegacyDefaultWorkflowTemplate } from "@/services/workflow-service"
+import {
+  findWorkflowEntryByFilePath,
+  repairLegacyDefaultWorkflowTemplate,
+  resolveWorkflowEntryFilePath,
+} from "@/services/workflow-service"
 import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
 
@@ -45,6 +48,16 @@ function asNumber(value: unknown) {
   }
 
   return undefined
+}
+
+function asIsoTimestamp(value: unknown) {
+  const numericValue = asNumber(value)
+  if (numericValue === undefined) {
+    return undefined
+  }
+
+  const timestamp = new Date(numericValue).toISOString()
+  return Number.isNaN(Date.parse(timestamp)) ? undefined : timestamp
 }
 
 function normalizeStatus(value: unknown): Run["status"] {
@@ -119,27 +132,83 @@ function mapSummary(value: unknown): Run["summary"] {
   }
 }
 
+function overrideStatusFromApprovals(
+  run: Run,
+  approvals: Array<{ runId: string; status: "pending" | "approved" | "denied" }>
+) {
+  if (run.status !== "waiting-approval") {
+    return run
+  }
+
+  const runApprovals = approvals.filter((approval) => approval.runId === run.id)
+  if (runApprovals.length === 0) {
+    return run
+  }
+
+  if (runApprovals.some((approval) => approval.status === "pending")) {
+    return run
+  }
+
+  if (runApprovals.some((approval) => approval.status === "denied")) {
+    return {
+      ...run,
+      status: "failed",
+      summary: {
+        ...run.summary,
+        pending: 0,
+      },
+    }
+  }
+
+  if (runApprovals.some((approval) => approval.status === "approved")) {
+    return {
+      ...run,
+      status: "finished",
+      summary: {
+        ...run.summary,
+        pending: 0,
+      },
+    }
+  }
+
+  return run
+}
+
 function mapSmithersRun(workspaceId: string, payload: unknown): Run {
   const run = asObject(payload)
   const workflow = asObject(run?.workflow)
   const workflowRef = asObject(run?.workflowRef)
   const state = asObject(run?.state)
+  const workflowPath =
+    asString(run?.workflowPath) ??
+    asString(run?.workflow_path) ??
+    null
+  const resolvedWorkflowFromPath = workflowPath ? findWorkflowEntryByFilePath(workspaceId, workflowPath) : null
+  const workflowPathId = resolvedWorkflowFromPath?.id ?? (workflowPath ? path.basename(path.dirname(workflowPath)) : null)
 
   const workflowId =
     asString(run?.workflowId) ??
     asString(run?.workflow_id) ??
     asString(workflow?.id) ??
     asString(workflowRef?.id) ??
+    workflowPathId ??
+    resolvedWorkflowFromPath?.name ??
     asString(workflow?.name) ??
     "unknown-workflow"
 
   const workflowName =
     asString(run?.workflowName) ??
+    resolvedWorkflowFromPath?.name ??
     asString(workflow?.name) ??
+    workflowPathId ??
     workflowId
 
   const startedAt =
     asString(run?.startedAt) ??
+    asIsoTimestamp(run?.startedAtMs) ??
+    asIsoTimestamp(run?.started_at_ms) ??
+    asIsoTimestamp(run?.createdAtMs) ??
+    asIsoTimestamp(run?.created_at_ms) ??
     asString(run?.createdAt) ??
     asString(run?.updatedAt) ??
     EPOCH_ISO_TIMESTAMP
@@ -160,6 +229,8 @@ function mapSmithersRun(workspaceId: string, payload: unknown): Run {
     startedAt,
     finishedAt:
       asString(run?.finishedAt) ??
+      asIsoTimestamp(run?.finishedAtMs) ??
+      asIsoTimestamp(run?.finished_at_ms) ??
       asString(run?.endedAt) ??
       asString(run?.completedAt) ??
       null,
@@ -195,23 +266,33 @@ function assertWorkspace(workspaceId: string) {
   return workspace
 }
 
-function resolveWorkflowPath(workspacePath: string, workflowId: string) {
-  const workflowDirectory = path.join(getWorkspaceWorkflowRootPath(workspacePath), workflowId)
-  const tsxPath = path.join(workflowDirectory, "workflow.tsx")
-  const tsPath = path.join(workflowDirectory, "workflow.ts")
-
-  if (existsSync(tsxPath)) {
-    return tsxPath
-  }
-
-  if (existsSync(tsPath)) {
-    return tsPath
-  }
-
-  return tsxPath
+function resolveManagedWorkflowPathFallback(workspacePath: string, workflowId: string) {
+  return path.join(workspacePath, ".smithers", "workflows", workflowId, "workflow.tsx")
 }
 
-function resolveWorkflowPathFromRun(workspacePath: string, run: unknown) {
+function resolveWorkflowPath(
+  workspaceId: string,
+  workspacePath: string,
+  workflowId: string,
+  options: { allowManagedFallback?: boolean } = {}
+) {
+  try {
+    return resolveWorkflowEntryFilePath(workspaceId, workflowId)
+  } catch (error) {
+    if (options.allowManagedFallback && error instanceof HttpError && error.status === 404) {
+      return resolveManagedWorkflowPathFallback(workspacePath, workflowId)
+    }
+
+    throw error
+  }
+}
+
+function resolveWorkflowPathFromRun(
+  workspaceId: string,
+  workspacePath: string,
+  run: unknown,
+  options: { allowManagedFallback?: boolean } = {}
+) {
   const runObject = asObject(run)
   const workflow = asObject(runObject?.workflow)
   const workflowRef = asObject(runObject?.workflowRef)
@@ -234,7 +315,7 @@ function resolveWorkflowPathFromRun(workspacePath: string, run: unknown) {
     return null
   }
 
-  return resolveWorkflowPath(workspacePath, workflowId)
+  return resolveWorkflowPath(workspaceId, workspacePath, workflowId, options)
 }
 
 function getWorkflowIdFromRun(run: unknown) {
@@ -255,14 +336,18 @@ export async function listRuns(workspaceId: string) {
   const workspace = assertWorkspace(workspaceId)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
   const payload = await listSmithersRuns(baseUrl)
-  return unwrapRuns(payload).map((run) => mapSmithersRun(workspaceId, run))
+  const approvals = listApprovalRowsByWorkspace(workspaceId)
+  return unwrapRuns(payload)
+    .map((run) => mapSmithersRun(workspaceId, run))
+    .map((run) => overrideStatusFromApprovals(run, approvals))
 }
 
 export async function getRun(workspaceId: string, runId: string) {
   const workspace = assertWorkspace(workspaceId)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
   const payload = await getSmithersRun(baseUrl, runId)
-  return mapSmithersRun(workspaceId, unwrapRun(payload))
+  const approvals = listApprovalRowsByWorkspace(workspaceId)
+  return overrideStatusFromApprovals(mapSmithersRun(workspaceId, unwrapRun(payload)), approvals)
 }
 
 export async function startRun(workspaceId: string, input: StartRunInput) {
@@ -270,7 +355,9 @@ export async function startRun(workspaceId: string, input: StartRunInput) {
   ensureWorkspaceSmithersLayout(workspace.path)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
   repairLegacyDefaultWorkflowTemplate(workspaceId, input.workflowId)
-  const workflowPath = resolveWorkflowPath(workspace.path, input.workflowId)
+  const workflowPath = resolveWorkflowPath(workspaceId, workspace.path, input.workflowId, {
+    allowManagedFallback: workspace.runtimeMode !== "self-managed",
+  })
 
   const payload = await createSmithersRun(baseUrl, {
     workflowPath,
@@ -295,14 +382,16 @@ export async function resumeRun(workspaceId: string, runId: string, input: Resum
     repairLegacyDefaultWorkflowTemplate(workspaceId, workflowId)
   }
 
-  const workflowPath = resolveWorkflowPathFromRun(workspace.path, unwrappedRun)
+  const resolvedWorkflowPath = resolveWorkflowPathFromRun(workspaceId, workspace.path, unwrappedRun, {
+    allowManagedFallback: workspace.runtimeMode !== "self-managed",
+  })
 
-  if (!workflowPath) {
+  if (!resolvedWorkflowPath) {
     throw new HttpError(422, `Unable to resolve workflowPath for run: ${runId}`)
   }
 
   const payload = await resumeSmithersRun(baseUrl, runId, {
-    workflowPath,
+    workflowPath: resolvedWorkflowPath,
     input: input.input ?? {},
   })
 

@@ -31,6 +31,10 @@ export type InlineTextSegment =
   | { kind: "text"; text: string }
   | { kind: "code"; text: string }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map((entry) => stableStringify(entry)).join(",")}]`
@@ -212,6 +216,26 @@ function extractJsonObjectStrings(value: string) {
   }
 
   return objectStrings
+}
+
+export function extractStructuredOutputProseText(value: string) {
+  let proseText = value
+  const objectStrings = extractJsonObjectStrings(value)
+
+  for (const objectString of objectStrings) {
+    const escapedObjectString = escapeRegExp(objectString)
+    const fencedJsonPattern = new RegExp("```json\\s*" + escapedObjectString + "\\s*```", "g")
+    const fencedPattern = new RegExp("```\\s*" + escapedObjectString + "\\s*```", "g")
+    const plainPattern = new RegExp(escapedObjectString, "g")
+
+    proseText = proseText.replace(fencedJsonPattern, "")
+    proseText = proseText.replace(fencedPattern, "")
+    proseText = proseText.replace(plainPattern, "")
+  }
+
+  return proseText
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\s+|\s+$/g, "")
 }
 
 export function parseStructuredOutputCards(value: string): StructuredOutputCard[] {

@@ -9,7 +9,7 @@ import { createApp } from "@/server/app"
 import { handleWorkflowRoutes } from "@/server/routes/workflow-routes"
 import { resolveTestWorkspacePath } from "@/testing/test-workspace-path"
 
-function seedWorkspace() {
+function seedWorkspace(params: { runtimeMode?: "burns-managed" | "self-managed" } = {}) {
   const workspaceId = `test-workspace-${randomUUID()}`
   const now = new Date().toISOString()
 
@@ -18,7 +18,7 @@ function seedWorkspace() {
     name: workspaceId,
     path: resolveTestWorkspacePath(workspaceId),
     sourceType: "create",
-    runtimeMode: "burns-managed",
+    runtimeMode: params.runtimeMode ?? "burns-managed",
     healthStatus: "healthy",
     createdAt: now,
     updatedAt: now,
@@ -218,6 +218,70 @@ describe("workflow routes", () => {
       source: "# Updated",
     })
     expect(readFileSync(filePath, "utf8")).toBe("# Updated")
+  })
+
+  it("discovers self-managed workflows outside the Burns workflow folder", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace({ runtimeMode: "self-managed" })
+    const workflowDirectoryPath = path.join(
+      resolveTestWorkspacePath(workspaceId),
+      "smithers",
+      "review"
+    )
+
+    mkdirSync(workflowDirectoryPath, { recursive: true })
+    writeFileSync(path.join(workflowDirectoryPath, "workflow.tsx"), validWorkflowSource, "utf8")
+
+    const listResponse = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/workflows`)
+    )
+
+    expect(listResponse.status).toBe(200)
+    expect(await listResponse.json()).toMatchObject([
+      {
+        id: "smithers-review",
+        workspaceId,
+        name: "valid-workflow",
+        relativePath: "smithers/review/workflow.tsx",
+      },
+    ])
+
+    const detailResponse = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/workflows/smithers-review`)
+    )
+
+    expect(detailResponse.status).toBe(200)
+    expect(await detailResponse.json()).toMatchObject({
+      id: "smithers-review",
+      relativePath: "smithers/review/workflow.tsx",
+      source: expect.stringContaining('name="valid-workflow"'),
+    })
+  })
+
+  it("rejects workflow saves for self-managed workspaces", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace({ runtimeMode: "self-managed" })
+    const workflowDirectoryPath = path.join(
+      resolveTestWorkspacePath(workspaceId),
+      "smithers",
+      "review"
+    )
+
+    mkdirSync(workflowDirectoryPath, { recursive: true })
+    writeFileSync(path.join(workflowDirectoryPath, "workflow.tsx"), validWorkflowSource, "utf8")
+
+    const response = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/workflows/smithers-review`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: directCtxInputSource }),
+      })
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining("Self-managed workflows are read-only"),
+    })
   })
 
   it("saves workflow.ts edits back to workflow.ts instead of creating workflow.tsx", async () => {
@@ -461,7 +525,7 @@ describe("workflow routes", () => {
       mode: "fallback",
       entryTaskId: "echo",
       fields: [],
-      message: "Workflow reads ctx.input directly. Provide a JSON object for the run input.",
+      message: "Enter run input as JSON.",
     })
   })
 

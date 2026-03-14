@@ -72,16 +72,6 @@ export function WorkspaceSelector() {
           >
             Runs
           </NavLink>
-          <NavLink
-            to={`/w/${workspace.id}/approvals`}
-            className={({ isActive }) =>
-              isActive
-                ? "rounded-md px-2 py-1.5 text-sm font-medium text-foreground"
-                : "rounded-md px-2 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
-            }
-          >
-            Approvals
-          </NavLink>
         </div>
       ) : null}
     </div>

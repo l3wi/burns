@@ -8,7 +8,6 @@ import {
   PlayIcon,
   Settings2Icon,
   SettingsIcon,
-  ShieldCheckIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
@@ -43,6 +42,7 @@ import { useResumeRun } from "@/features/runs/hooks/use-resume-run"
 import { useOpenWorkflowFolder } from "@/features/workflows/hooks/use-open-workflow-folder"
 import { useCopyWorkflowPath } from "@/features/workflows/hooks/use-copy-workflow-path"
 import { useWorkflows } from "@/features/workflows/hooks/use-workflows"
+import { canEditWorkspaceWorkflows } from "@/features/workflows/lib/access"
 import { useRuntimeContext } from "@/features/system/hooks/use-runtime-context"
 import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-workspace"
 import { useCopyWorkspacePath } from "@/features/workspaces/hooks/use-copy-workspace-path"
@@ -190,11 +190,6 @@ function getWorkspaceNavItems(workspaceId: string): SidebarItem[] {
       icon: PlayIcon,
     },
     {
-      label: "Approvals",
-      to: `/w/${workspaceId}/approvals`,
-      icon: ShieldCheckIcon,
-    },
-    {
       label: "Settings",
       to: `/w/${workspaceId}/settings`,
       icon: Settings2Icon,
@@ -206,6 +201,7 @@ export function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const { workspace, workspaces, isLoading } = useActiveWorkspace()
+  const canEditWorkflows = canEditWorkspaceWorkflows(workspace)
   const [expandedWorkspaceIds, setExpandedWorkspaceIds] = useState<Record<string, boolean>>({})
 
   const routeWorkspaceId = useMemo(() => {
@@ -508,7 +504,7 @@ export function AppShell() {
             </div>
           ) : isWorkflowRoute ? (
             <div className="flex items-center gap-2">
-              {isWorkflowsListRoute ? (
+              {isWorkflowsListRoute && canEditWorkflows ? (
                 <Button variant="outline" onClick={() => navigate(`${workflowsBasePath}/new`)}>
                   New workflow
                 </Button>
@@ -533,35 +529,37 @@ export function AppShell() {
                       {copyWorkflowPath.isPending ? "Copying path…" : "Copy Path"}
                     </Button>
                   ) : null}
-                  <Button
-                    variant="destructive"
-                    disabled={deleteWorkflow.isPending}
-                    onClick={() => {
-                      const confirmed = window.confirm(
-                        `Delete workflow "${workflowName ?? routeWorkflowId}"? This removes its workflow folder from disk.`
-                      )
-                      if (!confirmed) {
-                        return
-                      }
+                  {canEditWorkflows ? (
+                    <Button
+                      variant="destructive"
+                      disabled={deleteWorkflow.isPending}
+                      onClick={() => {
+                        const confirmed = window.confirm(
+                          `Delete workflow "${workflowName ?? routeWorkflowId}"? This removes its workflow folder from disk.`
+                        )
+                        if (!confirmed) {
+                          return
+                        }
 
-                      deleteWorkflow.mutate(routeWorkflowId, {
-                        onSuccess: () => {
-                          const remainingWorkflows = workflowBreadcrumbs.filter(
-                            (workflow) => workflow.id !== routeWorkflowId
-                          )
-                          const nextWorkflow = remainingWorkflows[0]
-                          if (!nextWorkflow) {
-                            navigate(workflowsBasePath)
-                            return
-                          }
+                        deleteWorkflow.mutate(routeWorkflowId, {
+                          onSuccess: () => {
+                            const remainingWorkflows = workflowBreadcrumbs.filter(
+                              (workflow) => workflow.id !== routeWorkflowId
+                            )
+                            const nextWorkflow = remainingWorkflows[0]
+                            if (!nextWorkflow) {
+                              navigate(workflowsBasePath)
+                              return
+                            }
 
-                          navigate(`${workflowsBasePath}/${nextWorkflow.id}`)
-                        },
-                      })
-                    }}
-                  >
-                    {deleteWorkflow.isPending ? "Deleting…" : "Delete workflow"}
-                  </Button>
+                            navigate(`${workflowsBasePath}/${nextWorkflow.id}`)
+                          },
+                        })
+                      }}
+                    >
+                      {deleteWorkflow.isPending ? "Deleting…" : "Delete workflow"}
+                    </Button>
+                  ) : null}
                 </>
               ) : null}
             </div>
