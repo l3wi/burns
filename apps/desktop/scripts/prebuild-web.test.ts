@@ -19,7 +19,7 @@ describe("desktop web prebuild", () => {
     expect(resolveBunExecutable("   ", {})).toBe("bun")
   })
 
-  it("spawns the web build with the resolved Bun executable", () => {
+  it("spawns the web build with the resolved Bun executable and runner config loader", () => {
     const commands: string[][] = []
 
     runWebPrebuild({
@@ -32,7 +32,9 @@ describe("desktop web prebuild", () => {
       log: () => {},
     })
 
-    expect(commands).toEqual([["/tmp/electrobun/bun", "run", "build"]])
+    expect(commands).toEqual([
+      ["/tmp/electrobun/bun", "run", "build", "--", "--configLoader", "runner"],
+    ])
   })
 
   it("skips the web build when the skip flag is enabled", () => {

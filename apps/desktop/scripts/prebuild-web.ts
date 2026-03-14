@@ -48,7 +48,7 @@ export function runWebPrebuild(options: RunWebPrebuildOptions = {}) {
 
   log("[desktop][preBuild] Building web app for desktop packaging...")
 
-  const result = spawnSync([bunExecutable, "run", "build"], {
+  const result = spawnSync([bunExecutable, "run", "build", "--", "--configLoader", "runner"], {
     cwd,
     stdout: "inherit",
     stderr: "inherit",
