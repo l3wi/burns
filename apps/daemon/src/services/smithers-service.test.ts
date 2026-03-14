@@ -189,6 +189,9 @@ export default smithers(() => (
     expect(requestBody).toMatchObject({
       workflowPath,
       input: { task: "hello" },
+      config: {
+        maxConcurrency: 4,
+      },
       metadata: {
         workspaceId,
         workflowId: "smithers-review",

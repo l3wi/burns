@@ -19,6 +19,7 @@ import {
   resolveWorkflowEntryFilePath,
 } from "@/services/workflow-service"
 import { getWorkspace } from "@/services/workspace-service"
+import { getSettings } from "@/services/settings-service"
 import { HttpError } from "@/utils/http-error"
 
 const EPOCH_ISO_TIMESTAMP = "1970-01-01T00:00:00.000Z"
@@ -352,6 +353,7 @@ export async function getRun(workspaceId: string, runId: string) {
 
 export async function startRun(workspaceId: string, input: StartRunInput) {
   const workspace = assertWorkspace(workspaceId)
+  const settings = getSettings()
   ensureWorkspaceSmithersLayout(workspace.path)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
   repairLegacyDefaultWorkflowTemplate(workspaceId, input.workflowId)
@@ -362,6 +364,9 @@ export async function startRun(workspaceId: string, input: StartRunInput) {
   const payload = await createSmithersRun(baseUrl, {
     workflowPath,
     input: input.input ?? {},
+    config: {
+      maxConcurrency: settings.maxConcurrency,
+    },
     metadata: {
       workspaceId,
       workflowId: input.workflowId,
@@ -373,6 +378,7 @@ export async function startRun(workspaceId: string, input: StartRunInput) {
 
 export async function resumeRun(workspaceId: string, runId: string, input: ResumeRunInput) {
   const workspace = assertWorkspace(workspaceId)
+  const settings = getSettings()
   ensureWorkspaceSmithersLayout(workspace.path)
   const baseUrl = await ensureWorkspaceSmithersBaseUrl(workspace)
   const existingRunPayload = await getSmithersRun(baseUrl, runId)
@@ -393,6 +399,9 @@ export async function resumeRun(workspaceId: string, runId: string, input: Resum
   const payload = await resumeSmithersRun(baseUrl, runId, {
     workflowPath: resolvedWorkflowPath,
     input: input.input ?? {},
+    config: {
+      maxConcurrency: settings.maxConcurrency,
+    },
   })
 
   return mapSmithersRun(workspaceId, unwrapRun(payload))

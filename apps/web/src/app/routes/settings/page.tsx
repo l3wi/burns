@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { SettingsMutationResult } from "@burns/shared"
+import type { Settings, SettingsMutationResult } from "@burns/shared"
 import { useFactoryReset } from "@/features/settings/hooks/use-factory-reset"
 import { useResetSettings } from "@/features/settings/hooks/use-reset-settings"
 import { useSettings } from "@/features/settings/hooks/use-settings"
@@ -47,11 +47,6 @@ type FormRowProps = {
 const booleanOptions = [
   { value: "false", label: "Disabled" },
   { value: "true", label: "Enabled" },
-] as const
-
-const rootDirOptions = [
-  { value: "workspace-root", label: "Workspace root" },
-  { value: "process-default", label: "Process default" },
 ] as const
 
 const smithersAuthModeOptions = [
@@ -145,33 +140,44 @@ export function SettingsPage() {
   const navigate = useNavigate()
   const { data: settings, isLoading } = useSettings()
   const { data: agentClis = [], isLoading: isLoadingAgentClis } = useAgentClis()
+
+  if (isLoading || !settings) {
+    return <div className="p-6 text-sm text-muted-foreground">Loading settings…</div>
+  }
+
+  return (
+    <LoadedSettingsPage
+      key={JSON.stringify(settings)}
+      settings={settings}
+      agentClis={agentClis}
+      isLoadingAgentClis={isLoadingAgentClis}
+      navigate={navigate}
+    />
+  )
+}
+
+function LoadedSettingsPage({
+  settings,
+  agentClis,
+  isLoadingAgentClis,
+  navigate,
+}: {
+  settings: Settings
+  agentClis: ReadonlyArray<{ name: string }>
+  isLoadingAgentClis: boolean
+  navigate: ReturnType<typeof useNavigate>
+}) {
   const updateSettings = useUpdateSettings()
   const resetSettings = useResetSettings()
   const factoryReset = useFactoryReset()
-  const [formValues, setFormValues] = useState<SettingsFormValues | null>(null)
+  const [formValues, setFormValues] = useState<SettingsFormValues>(() => settingsToFormValues(settings))
   const [clearSmithersAuthToken, setClearSmithersAuthToken] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
 
   const isLocalDaemonUrl = isLocalhostBurnsApiUrl()
 
-  useEffect(() => {
-    if (!settings) {
-      return
-    }
-
-    setFormValues(settingsToFormValues(settings))
-    setClearSmithersAuthToken(false)
-  }, [settings])
-
-  if (isLoading || !formValues) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading settings…</div>
-  }
-
   const currentFormValues = formValues
   const currentSettings = settings
-  if (!currentSettings) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading settings…</div>
-  }
 
   const errors = validateSettingsForm(currentFormValues)
   const defaultAgentOptions = buildDefaultAgentOptions(agentClis, currentFormValues.defaultAgent)
@@ -270,10 +276,53 @@ export function SettingsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Runtime</CardTitle>
+            <CardTitle>Smithers</CardTitle>
             <CardDescription>Defaults Burns uses when it launches or connects to Smithers.</CardDescription>
           </CardHeader>
           <CardContent>
+            <FormRow
+              label="Allow network"
+              description="Applied to Burns-managed Smithers instances. Saving restarts running managed runtimes when this changes."
+            >
+              <SettingsSelect
+                value={currentFormValues.allowNetwork}
+                onChange={(value) => setField("allowNetwork", value as SettingsFormValues["allowNetwork"])}
+                options={booleanOptions}
+              />
+            </FormRow>
+
+            <FormRow
+              label="Max concurrency"
+              htmlFor="settings-max-concurrency"
+              description="Default number of workflow tasks Smithers may run in parallel for new runs."
+            >
+              <Input
+                id="settings-max-concurrency"
+                type="number"
+                min="1"
+                step="1"
+                value={currentFormValues.maxConcurrency}
+                onChange={(event) => setField("maxConcurrency", event.target.value)}
+              />
+              {errors.maxConcurrency ? <p className="text-xs text-destructive">{errors.maxConcurrency}</p> : null}
+            </FormRow>
+
+            <FormRow
+              label="Max body bytes"
+              htmlFor="settings-max-body-bytes"
+              description="Maximum HTTP request body size Burns-managed Smithers accepts. Saving restarts running managed runtimes when this changes."
+            >
+              <Input
+                id="settings-max-body-bytes"
+                type="number"
+                min="1"
+                step="1"
+                value={currentFormValues.maxBodyBytes}
+                onChange={(event) => setField("maxBodyBytes", event.target.value)}
+              />
+              {errors.maxBodyBytes ? <p className="text-xs text-destructive">{errors.maxBodyBytes}</p> : null}
+            </FormRow>
+
             <FormRow
               label="Default Smithers URL"
               htmlFor="settings-smithers-base-url"
@@ -300,26 +349,6 @@ export function SettingsPage() {
                 options={booleanOptions}
               />
             </FormRow>
-
-            <FormRow
-              label="Allow network"
-              description="Applied to Burns-managed Smithers instances. Saving restarts running managed runtimes when this changes."
-            >
-              <SettingsSelect
-                value={currentFormValues.allowNetwork}
-                onChange={(value) => setField("allowNetwork", value as SettingsFormValues["allowNetwork"])}
-                options={booleanOptions}
-              />
-            </FormRow>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Advanced</CardTitle>
-            <CardDescription>Security, execution scope, and diagnostics preferences.</CardDescription>
-          </CardHeader>
-          <CardContent>
             <FormRow
               label="Smithers auth header"
               description="Used when Burns talks to Smithers and an auth token is configured."
@@ -368,17 +397,15 @@ export function SettingsPage() {
                 </Button>
               </div>
             </FormRow>
+          </CardContent>
+        </Card>
 
-            <FormRow
-              label="rootDir policy"
-              description="`Workspace root` keeps Burns-managed Smithers scoped to the current workspace. Saving restarts running managed runtimes when this changes."
-            >
-              <SettingsSelect
-                value={currentFormValues.rootDirPolicy}
-                onChange={(value) => setField("rootDirPolicy", value as SettingsFormValues["rootDirPolicy"])}
-                options={rootDirOptions}
-              />
-            </FormRow>
+        <Card>
+          <CardHeader>
+            <CardTitle>Diagnostics</CardTitle>
+            <CardDescription>Daemon logging preferences.</CardDescription>
+          </CardHeader>
+          <CardContent>
 
             <FormRow
               label="Diagnostics log level"

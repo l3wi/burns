@@ -45,11 +45,25 @@ function parseBoolean(rawValue: string | undefined) {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
 }
 
+function parsePositiveInt(rawValue: string | undefined, fallback: number) {
+  if (!rawValue) {
+    return fallback
+  }
+
+  const parsed = Number(rawValue)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback
+  }
+
+  return parsed
+}
+
 const workspaceId = requireEnv("BURNS_SMITHERS_WORKSPACE_ID")
 const workspacePath = requireEnv("BURNS_SMITHERS_WORKSPACE_PATH")
 const dbPath = requireEnv("BURNS_SMITHERS_DB_PATH")
 const port = parsePort(requireEnv("BURNS_SMITHERS_PORT"))
 const allowNetwork = parseBoolean(process.env.BURNS_SMITHERS_ALLOW_NETWORK)
+const maxBodyBytes = parsePositiveInt(process.env.BURNS_SMITHERS_MAX_BODY_BYTES, 1_048_576)
 const rootDirPolicy = process.env.BURNS_SMITHERS_ROOT_DIR_POLICY?.trim() || "workspace-root"
 const daemonPid = parseOptionalPid(process.env.BURNS_DAEMON_PID)
 
@@ -67,6 +81,7 @@ const server = startServer({
   db,
   rootDir: rootDirPolicy === "workspace-root" ? workspacePath : undefined,
   allowNetwork,
+  maxBodyBytes,
 })
 
 let shuttingDown = false

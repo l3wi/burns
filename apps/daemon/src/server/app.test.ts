@@ -31,6 +31,8 @@ describe("daemon route method guards", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({
       allowNetwork: false,
+      maxConcurrency: 4,
+      maxBodyBytes: 1048576,
       smithersAuthMode: "bearer",
       rootDirPolicy: "workspace-root",
     })

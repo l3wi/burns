@@ -13,6 +13,8 @@ export function getBurnsSmithersRuntimeDefaults() {
     smithersManagedPerWorkspace: settings.smithersManagedPerWorkspace,
     smithersBaseUrl: settings.smithersBaseUrl,
     allowNetwork: settings.allowNetwork,
+    maxConcurrency: settings.maxConcurrency,
+    maxBodyBytes: settings.maxBodyBytes,
     rootDirPolicy: settings.rootDirPolicy,
   }
 }
@@ -21,6 +23,7 @@ export function haveManagedRuntimeSettingsChanged(previous: Settings, next: Sett
   return (
     previous.smithersManagedPerWorkspace !== next.smithersManagedPerWorkspace ||
     previous.allowNetwork !== next.allowNetwork ||
+    previous.maxBodyBytes !== next.maxBodyBytes ||
     previous.rootDirPolicy !== next.rootDirPolicy
   )
 }

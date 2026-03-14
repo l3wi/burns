@@ -18,10 +18,9 @@ type WorkflowOpenOptions = {
 
 function defaultRunCommand(command: string, args: string[]): CommandResult {
   const result = spawnSync(command, args, {
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: "pipe",
   })
-  const exitCode = "status" in result ? (result.status ?? 1) : (result.exitCode ?? 1)
+  const exitCode = result.status ?? 1
   const effectiveExitCode = exitCode === null ? 1 : exitCode
 
   return {

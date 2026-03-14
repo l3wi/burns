@@ -95,6 +95,8 @@ db.exec(`
     default_agent TEXT NOT NULL,
     smithers_base_url TEXT NOT NULL,
     allow_network INTEGER NOT NULL DEFAULT 0,
+    max_concurrency INTEGER NOT NULL DEFAULT 4,
+    max_body_bytes INTEGER NOT NULL DEFAULT 1048576,
     smithers_managed_per_workspace INTEGER NOT NULL DEFAULT 0,
     smithers_auth_mode TEXT,
     smithers_auth_token TEXT,
@@ -105,3 +107,16 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 `)
+
+const appSettingsColumns = db
+  .query<{ name: string }, []>(`PRAGMA table_info(app_settings)`)
+  .all()
+const appSettingsColumnNames = new Set(appSettingsColumns.map((column) => column.name))
+
+if (!appSettingsColumnNames.has("max_concurrency")) {
+  db.exec(`ALTER TABLE app_settings ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT 4;`)
+}
+
+if (!appSettingsColumnNames.has("max_body_bytes")) {
+  db.exec(`ALTER TABLE app_settings ADD COLUMN max_body_bytes INTEGER NOT NULL DEFAULT 1048576;`)
+}

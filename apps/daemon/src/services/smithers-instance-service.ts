@@ -110,6 +110,10 @@ function getAllowNetworkSetting() {
   return getBurnsSmithersRuntimeDefaults().allowNetwork
 }
 
+function getMaxBodyBytesSetting() {
+  return getBurnsSmithersRuntimeDefaults().maxBodyBytes
+}
+
 function getRootDirPolicySetting() {
   return getBurnsSmithersRuntimeDefaults().rootDirPolicy
 }
@@ -373,6 +377,7 @@ async function startRecord(record: SmithersInstanceRecord) {
       BURNS_SMITHERS_DB_PATH: dbPath,
       BURNS_SMITHERS_PORT: String(port),
       BURNS_SMITHERS_ALLOW_NETWORK: getAllowNetworkSetting() ? "1" : "0",
+      BURNS_SMITHERS_MAX_BODY_BYTES: String(getMaxBodyBytesSetting()),
       BURNS_SMITHERS_ROOT_DIR_POLICY: getRootDirPolicySetting(),
       BURNS_DAEMON_PID: String(process.pid),
     } satisfies NodeJS.ProcessEnv
@@ -830,6 +835,8 @@ export async function reconcileManagedWorkspaceRuntimeAfterSettingsChange(
       affectedManagedWorkspaces: 0,
       restartedManagedWorkspaces: 0,
       stoppedManagedWorkspaces: 0,
+      daemonSettingsChanged: false,
+      daemonRestartScheduled: false,
     }
   }
 
@@ -850,6 +857,8 @@ export async function reconcileManagedWorkspaceRuntimeAfterSettingsChange(
       affectedManagedWorkspaces: activeManagedRecords.length,
       restartedManagedWorkspaces: 0,
       stoppedManagedWorkspaces: stopResults.filter((result) => result.status === "fulfilled").length,
+      daemonSettingsChanged: false,
+      daemonRestartScheduled: false,
     }
   }
 
@@ -860,6 +869,8 @@ export async function reconcileManagedWorkspaceRuntimeAfterSettingsChange(
       affectedManagedWorkspaces: 0,
       restartedManagedWorkspaces: 0,
       stoppedManagedWorkspaces: 0,
+      daemonSettingsChanged: false,
+      daemonRestartScheduled: false,
     }
   }
 
@@ -878,5 +889,7 @@ export async function reconcileManagedWorkspaceRuntimeAfterSettingsChange(
     affectedManagedWorkspaces: activeManagedRecords.length,
     restartedManagedWorkspaces: restartResults.filter((result) => result.status === "fulfilled").length,
     stoppedManagedWorkspaces: 0,
+    daemonSettingsChanged: false,
+    daemonRestartScheduled: false,
   }
 }

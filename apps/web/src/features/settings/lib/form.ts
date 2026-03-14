@@ -10,6 +10,8 @@ export type SettingsFormValues = {
   defaultAgent: string
   smithersBaseUrl: string
   allowNetwork: "true" | "false"
+  maxConcurrency: string
+  maxBodyBytes: string
   smithersManagedPerWorkspace: "true" | "false"
   smithersAuthMode: Settings["smithersAuthMode"]
   smithersAuthToken: string
@@ -26,6 +28,8 @@ export function settingsToFormValues(settings: Settings): SettingsFormValues {
     defaultAgent: settings.defaultAgent,
     smithersBaseUrl: settings.smithersBaseUrl,
     allowNetwork: String(settings.allowNetwork) as "true" | "false",
+    maxConcurrency: String(settings.maxConcurrency),
+    maxBodyBytes: String(settings.maxBodyBytes),
     smithersManagedPerWorkspace: String(settings.smithersManagedPerWorkspace) as "true" | "false",
     smithersAuthMode: settings.smithersAuthMode,
     smithersAuthToken: "",
@@ -53,6 +57,16 @@ export function validateSettingsForm(values: SettingsFormValues): SettingsFormEr
     errors.smithersBaseUrl = smithersUrlError
   }
 
+  const maxConcurrency = Number(values.maxConcurrency)
+  if (!Number.isInteger(maxConcurrency) || maxConcurrency <= 0) {
+    errors.maxConcurrency = "Max concurrency must be a positive integer."
+  }
+
+  const maxBodyBytes = Number(values.maxBodyBytes)
+  if (!Number.isInteger(maxBodyBytes) || maxBodyBytes <= 0) {
+    errors.maxBodyBytes = "Max body bytes must be a positive integer."
+  }
+
   return errors
 }
 
@@ -65,6 +79,8 @@ export function buildUpdateSettingsInput(
     defaultAgent: values.defaultAgent.trim(),
     smithersBaseUrl: values.smithersBaseUrl.trim(),
     allowNetwork: values.allowNetwork === "true",
+    maxConcurrency: Number(values.maxConcurrency),
+    maxBodyBytes: Number(values.maxBodyBytes),
     smithersManagedPerWorkspace: values.smithersManagedPerWorkspace === "true",
     smithersAuthMode: values.smithersAuthMode,
     smithersAuthToken: values.smithersAuthToken.trim() || undefined,

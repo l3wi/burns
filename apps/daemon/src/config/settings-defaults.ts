@@ -8,7 +8,12 @@ import {
   type DiagnosticsLogLevel,
 } from "@burns/shared"
 
-import { DEFAULT_AGENT, DEFAULT_SMITHERS_BASE_URL } from "@/config/app-config"
+import {
+  DEFAULT_AGENT,
+  DEFAULT_SMITHERS_BASE_URL,
+  DEFAULT_SMITHERS_MAX_BODY_BYTES,
+  DEFAULT_SMITHERS_MAX_CONCURRENCY,
+} from "@/config/app-config"
 import { DEFAULT_WORKSPACES_ROOT } from "@/config/paths"
 
 function parseBooleanEnv(value: string | undefined) {
@@ -41,6 +46,19 @@ function parseLogLevelEnv(value: string | undefined): DiagnosticsLogLevel | unde
   return undefined
 }
 
+function parsePositiveIntEnv(value: string | undefined) {
+  if (!value) {
+    return undefined
+  }
+
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return undefined
+  }
+
+  return parsed
+}
+
 function resolveDefaultSmithersBaseUrl() {
   return process.env.BURNS_SMITHERS_BASE_URL?.trim() || DEFAULT_SMITHERS_BASE_URL
 }
@@ -71,6 +89,8 @@ export function getSettingsDefaults(): Settings {
     defaultAgent: process.env.BURNS_DEFAULT_AGENT?.trim() || DEFAULT_AGENT,
     smithersBaseUrl: resolveDefaultSmithersBaseUrl(),
     allowNetwork: parseBooleanEnv(process.env.BURNS_SMITHERS_ALLOW_NETWORK) ?? false,
+    maxConcurrency: parsePositiveIntEnv(process.env.BURNS_SMITHERS_MAX_CONCURRENCY) ?? DEFAULT_SMITHERS_MAX_CONCURRENCY,
+    maxBodyBytes: parsePositiveIntEnv(process.env.BURNS_SMITHERS_MAX_BODY_BYTES) ?? DEFAULT_SMITHERS_MAX_BODY_BYTES,
     smithersManagedPerWorkspace: getDefaultSmithersManagedPerWorkspace(),
     smithersAuthMode:
       (process.env.BURNS_SMITHERS_AUTH_MODE?.trim() as SmithersAuthMode | undefined) ?? "bearer",

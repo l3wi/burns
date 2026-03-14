@@ -49,6 +49,14 @@ function validateSmithersBaseUrl(baseUrl: string) {
   return parsedUrl.toString().replace(/\/$/, "")
 }
 
+function validatePositiveInteger(value: number, label: string) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new HttpError(400, `${label} must be a positive integer`)
+  }
+
+  return value
+}
+
 function mapStoredSettingsToResponse(row: ReturnType<typeof findSettingsRow>, defaults: Settings): Settings {
   if (!row) {
     return defaults
@@ -59,6 +67,8 @@ function mapStoredSettingsToResponse(row: ReturnType<typeof findSettingsRow>, de
     defaultAgent: row.default_agent,
     smithersBaseUrl: row.smithers_base_url,
     allowNetwork: Boolean(row.allow_network),
+    maxConcurrency: row.max_concurrency,
+    maxBodyBytes: row.max_body_bytes,
     smithersManagedPerWorkspace: Boolean(row.smithers_managed_per_workspace),
     smithersAuthMode: row.smithers_auth_mode ?? defaults.smithersAuthMode,
     hasSmithersAuthToken: Boolean(row.smithers_auth_token),
@@ -78,6 +88,8 @@ function persistSettings(params: {
     default_agent: params.settings.defaultAgent,
     smithers_base_url: params.settings.smithersBaseUrl,
     allow_network: params.settings.allowNetwork ? 1 : 0,
+    max_concurrency: params.settings.maxConcurrency,
+    max_body_bytes: params.settings.maxBodyBytes,
     smithers_managed_per_workspace: params.settings.smithersManagedPerWorkspace ? 1 : 0,
     smithers_auth_mode: params.settings.smithersAuthMode,
     smithers_auth_token: params.smithersAuthToken,
@@ -117,6 +129,8 @@ export function updateSettings(input: UpdateSettingsInput) {
     defaultAgent: input.defaultAgent.trim(),
     smithersBaseUrl: validateSmithersBaseUrl(input.smithersBaseUrl),
     allowNetwork: input.allowNetwork,
+    maxConcurrency: validatePositiveInteger(input.maxConcurrency, "Max concurrency"),
+    maxBodyBytes: validatePositiveInteger(input.maxBodyBytes, "Max body bytes"),
     smithersManagedPerWorkspace: input.smithersManagedPerWorkspace,
     smithersAuthMode: smithersAuthModeSchema.parse(input.smithersAuthMode),
     hasSmithersAuthToken:

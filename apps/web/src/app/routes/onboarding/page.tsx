@@ -1,6 +1,7 @@
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useState } from "react"
 import { Navigate, useNavigate } from "react-router-dom"
 
+import type { Settings } from "@burns/shared"
 import burnsAvatar from "@/assets/burns.png"
 import { Button } from "@/components/ui/button"
 import { Onboarding01 } from "@/components/onboarding-01"
@@ -42,12 +43,7 @@ const allowNetworkOptions = [
   { value: "true", label: "On" },
 ] as const
 
-const rootDirOptions = [
-  { value: "workspace-root", label: "Workspace root" },
-  { value: "process-default", label: "Process default" },
-] as const
-
-type OnboardingStep = "workspace" | "agents" | "advanced"
+type OnboardingStep = "workspace" | "agents" | "smithers"
 
 export function OnboardingPage() {
   const navigate = useNavigate()
@@ -55,27 +51,8 @@ export function OnboardingPage() {
   const { data: onboardingStatus, isLoading: isLoadingStatus } = useOnboardingStatus()
   const { data: settings, isLoading: isLoadingSettings } = useSettings()
   const { data: agentClis = [], isLoading: isLoadingAgentClis } = useAgentClis()
-  const updateSettings = useUpdateSettings()
-  const completeOnboarding = useCompleteOnboarding()
-  const [hasStarted, setHasStarted] = useState(false)
-  const [step, setStep] = useState<OnboardingStep>("workspace")
-  const [formValues, setFormValues] = useState<SettingsFormValues | null>(null)
 
-  const isLocalDaemonUrl = isLocalhostBurnsApiUrl()
-  const canUseNativeFolderPicker =
-    isLocalDaemonUrl &&
-    typeof navigator !== "undefined" &&
-    /(Mac|iPhone|iPad|iPod)/i.test(navigator.platform)
-
-  useEffect(() => {
-    if (!settings) {
-      return
-    }
-
-    setFormValues(settingsToFormValues(settings))
-  }, [settings])
-
-  if (isLoadingWorkspaces || isLoadingStatus || isLoadingSettings || !formValues) {
+  if (isLoadingWorkspaces || isLoadingStatus || isLoadingSettings || !settings) {
     return <div className="p-6 text-sm text-muted-foreground">Loading onboarding…</div>
   }
 
@@ -86,6 +63,40 @@ export function OnboardingPage() {
   if (onboardingStatus?.completed) {
     return <Navigate to="/workspaces/new" replace />
   }
+
+  return (
+    <LoadedOnboardingPage
+      key={JSON.stringify(settings)}
+      settings={settings}
+      agentClis={agentClis}
+      isLoadingAgentClis={isLoadingAgentClis}
+      navigate={navigate}
+    />
+  )
+}
+
+function LoadedOnboardingPage({
+  settings,
+  agentClis,
+  isLoadingAgentClis,
+  navigate,
+}: {
+  settings: Settings
+  agentClis: ReadonlyArray<{ name: string }>
+  isLoadingAgentClis: boolean
+  navigate: ReturnType<typeof useNavigate>
+}) {
+  const updateSettings = useUpdateSettings()
+  const completeOnboarding = useCompleteOnboarding()
+  const [hasStarted, setHasStarted] = useState(false)
+  const [step, setStep] = useState<OnboardingStep>("workspace")
+  const [formValues, setFormValues] = useState<SettingsFormValues>(() => settingsToFormValues(settings))
+
+  const isLocalDaemonUrl = isLocalhostBurnsApiUrl()
+  const canUseNativeFolderPicker =
+    isLocalDaemonUrl &&
+    typeof navigator !== "undefined" &&
+    /(Mac|iPhone|iPad|iPod)/i.test(navigator.platform)
 
   const currentFormValues = formValues
   const errors = validateSettingsForm(currentFormValues)
@@ -157,7 +168,7 @@ export function OnboardingPage() {
       id: "agents",
       title: "Agents",
       description: "Pick the CLI Burns should use by default when it generates or edits workflows.",
-      completed: step === "advanced",
+      completed: step === "smithers",
       content: (
         <div className="flex flex-col gap-4">
           <FieldBlock
@@ -182,7 +193,7 @@ export function OnboardingPage() {
             <Button variant="outline" onClick={() => setStep("workspace")}>
               Back
             </Button>
-            <Button onClick={() => setStep("advanced")} disabled={Boolean(errors.defaultAgent)}>
+            <Button onClick={() => setStep("smithers")} disabled={Boolean(errors.defaultAgent)}>
               Continue
             </Button>
           </div>
@@ -190,9 +201,9 @@ export function OnboardingPage() {
       ),
     },
     {
-      id: "advanced",
-      title: "Advanced",
-      description: "A couple of lower-level defaults that affect what Burns-managed Smithers can access.",
+      id: "smithers",
+      title: "Smithers Settings",
+      description: "Set the default Smithers access Burns should use for Burns-managed workspaces.",
       completed: false,
       content: (
         <div className="flex flex-col gap-4">
@@ -208,13 +219,18 @@ export function OnboardingPage() {
           </FieldBlock>
 
           <FieldBlock
-            label="Root Dir"
-            description="This controls how much of your filesystem Smithers can see. `Workspace root` keeps it limited to the current workspace and is the safest choice."
+            label="Max concurrency"
+            description="How many workflow tasks Smithers may run in parallel. `4` is a good default for most local workspaces."
+            error={errors.maxConcurrency}
           >
-            <SettingsSelect
-              value={currentFormValues.rootDirPolicy}
-              onChange={(value) => setField("rootDirPolicy", value as SettingsFormValues["rootDirPolicy"])}
-              options={rootDirOptions}
+            <Input
+              id="onboarding-max-concurrency"
+              type="number"
+              min="1"
+              step="1"
+              value={currentFormValues.maxConcurrency}
+              onChange={(event) => setField("maxConcurrency", event.target.value)}
+              aria-invalid={Boolean(errors.maxConcurrency)}
             />
           </FieldBlock>
 
@@ -230,7 +246,11 @@ export function OnboardingPage() {
             </Button>
             <Button
               onClick={() => void handleSaveAndContinue()}
-              disabled={updateSettings.isPending || completeOnboarding.isPending}
+              disabled={
+                updateSettings.isPending ||
+                completeOnboarding.isPending ||
+                Boolean(errors.maxConcurrency)
+              }
             >
               {updateSettings.isPending || completeOnboarding.isPending ? "Saving..." : "Save and continue"}
             </Button>

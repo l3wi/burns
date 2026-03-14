@@ -49,14 +49,18 @@ function extractErrorMessage(payload: unknown): string | null {
 
 async function requestJson<T>(baseUrl: string, pathname: string, init?: RequestInit): Promise<T> {
   const authHeaders = buildSmithersAuthHeaders()
+  const headers = new Headers(init?.headers)
+  headers.set("content-type", "application/json")
+
+  for (const [key, value] of Object.entries(authHeaders)) {
+    if (typeof value === "string") {
+      headers.set(key, value)
+    }
+  }
 
   const response = await fetch(buildSmithersUrl(baseUrl, pathname), {
     ...init,
-    headers: {
-      "content-type": "application/json",
-      ...authHeaders,
-      ...(init?.headers ?? {}),
-    },
+    headers,
   })
 
   if (!response.ok) {
@@ -127,6 +131,15 @@ export async function streamSmithersRunEvents(
 ) {
   const searchParams = new URLSearchParams()
   const authHeaders = buildSmithersAuthHeaders()
+  const headers = new Headers({
+    accept: "text/event-stream",
+  })
+
+  for (const [key, value] of Object.entries(authHeaders)) {
+    if (typeof value === "string") {
+      headers.set(key, value)
+    }
+  }
   if (afterSeq !== undefined) {
     searchParams.set("afterSeq", String(afterSeq))
   }
@@ -134,10 +147,7 @@ export async function streamSmithersRunEvents(
   const response = await fetch(
     buildSmithersUrl(baseUrl, `/v1/runs/${runId}/events`, searchParams),
     {
-      headers: {
-        accept: "text/event-stream",
-        ...authHeaders,
-      },
+      headers,
       signal,
     }
   )

@@ -6,6 +6,8 @@ export type SettingsRow = {
   default_agent: string
   smithers_base_url: string
   allow_network: number
+  max_concurrency: number
+  max_body_bytes: number
   smithers_managed_per_workspace: number
   smithers_auth_mode: string | null
   smithers_auth_token: string | null
@@ -28,6 +30,8 @@ export function findSettingsRow() {
           default_agent,
           smithers_base_url,
           allow_network,
+          max_concurrency,
+          max_body_bytes,
           smithers_managed_per_workspace,
           smithers_auth_mode,
           smithers_auth_token,
@@ -53,6 +57,8 @@ export function upsertSettingsRow(input: UpsertSettingsRowInput) {
           default_agent,
           smithers_base_url,
           allow_network,
+          max_concurrency,
+          max_body_bytes,
           smithers_managed_per_workspace,
           smithers_auth_mode,
           smithers_auth_token,
@@ -61,12 +67,14 @@ export function upsertSettingsRow(input: UpsertSettingsRowInput) {
           diagnostics_pretty_logs,
           onboarding_completed,
           updated_at
-        ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
         ON CONFLICT(id) DO UPDATE SET
           workspace_root = excluded.workspace_root,
           default_agent = excluded.default_agent,
           smithers_base_url = excluded.smithers_base_url,
           allow_network = excluded.allow_network,
+          max_concurrency = excluded.max_concurrency,
+          max_body_bytes = excluded.max_body_bytes,
           smithers_managed_per_workspace = excluded.smithers_managed_per_workspace,
           smithers_auth_mode = excluded.smithers_auth_mode,
           smithers_auth_token = excluded.smithers_auth_token,
@@ -82,6 +90,8 @@ export function upsertSettingsRow(input: UpsertSettingsRowInput) {
       input.default_agent,
       input.smithers_base_url,
       input.allow_network,
+      input.max_concurrency,
+      input.max_body_bytes,
       input.smithers_managed_per_workspace,
       input.smithers_auth_mode,
       input.smithers_auth_token,
