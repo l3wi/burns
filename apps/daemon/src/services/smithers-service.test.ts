@@ -261,7 +261,7 @@ export default smithers(() => (
     })
   })
 
-  it("treats stale waiting-approval runs as finished once approval is granted locally", async () => {
+  it("keeps waiting-approval runs paused until Smithers reports a resumed state", async () => {
     const workspacePath = createWorkspacePath()
     const workspaceId = seedWorkspace(workspacePath)
 
@@ -299,16 +299,16 @@ export default smithers(() => (
 
     expect(runs[0]).toMatchObject({
       id: "run-789",
-      status: "finished",
+      status: "waiting-approval",
       summary: {
         finished: 3,
         inProgress: 0,
-        pending: 0,
+        pending: 1,
       },
     })
   })
 
-  it("treats stale waiting-approval run detail as finished once approval is granted locally", async () => {
+  it("keeps waiting-approval run detail paused until Smithers reports a resumed state", async () => {
     const workspacePath = createWorkspacePath()
     const workspaceId = seedWorkspace(workspacePath)
 
@@ -344,11 +344,11 @@ export default smithers(() => (
 
     expect(run).toMatchObject({
       id: "run-999",
-      status: "finished",
+      status: "waiting-approval",
       summary: {
         finished: 3,
         inProgress: 0,
-        pending: 0,
+        pending: 1,
       },
     })
   })

@@ -327,7 +327,7 @@ Returns workspace approvals from local persistence.
 
 ## `POST /api/workspaces/:workspaceId/runs/:runId/nodes/:nodeId/approve`
 
-Sends approval decision to Smithers and persists local approval state.
+Sends approval decision to Smithers, resumes the run through the standard resume flow, and persists local approval state.
 
 Request body:
 

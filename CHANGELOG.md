@@ -21,6 +21,8 @@ The format follows Keep a Changelog and this project currently tracks SemVer-sty
 
 ### Changed
 
+- Changed Burns approvals to trigger a real Smithers resume after approval and stopped treating approved `waiting-approval` runs as locally finished before Smithers reports a terminal state.
+
 - Hardened canary/stable workflows with runtime smoke checks, strict artifact collection, and artifact integrity verification.
 - Simplified first-run onboarding by removing the `rootDir` choice and renaming the final step to `Smithers Settings`.
 - Updated release docs and README entries for new smoke and release artifact commands.

@@ -161,17 +161,6 @@ function overrideStatusFromApprovals(
     }
   }
 
-  if (runApprovals.some((approval) => approval.status === "approved")) {
-    return {
-      ...run,
-      status: "finished",
-      summary: {
-        ...run.summary,
-        pending: 0,
-      },
-    }
-  }
-
   return run
 }
 

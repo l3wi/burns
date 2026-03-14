@@ -1,23 +1,31 @@
 import { randomUUID } from "node:crypto"
+import { mkdirSync, rmSync } from "node:fs"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { findApprovalRow } from "@/db/repositories/approval-repository"
-import { insertWorkspaceRow } from "@/db/repositories/workspace-repository"
+import { deleteApprovalRowsByWorkspaceId, findApprovalRow } from "@/db/repositories/approval-repository"
+import { deleteWorkspaceRowById, insertWorkspaceRow } from "@/db/repositories/workspace-repository"
 import { decideApproval, listApprovals, syncApprovalFromEvent } from "@/services/approval-service"
 import { resolveTestWorkspacePath } from "@/testing/test-workspace-path"
 
 const originalFetch = globalThis.fetch
+const workspaceIdsToDelete = new Set<string>()
+const workspacePathsToDelete = new Set<string>()
 
 function seedWorkspace(workspaceId = `test-workspace-${randomUUID()}`) {
   const now = new Date().toISOString()
+  const workspacePath = resolveTestWorkspacePath(workspaceId)
+  mkdirSync(workspacePath, { recursive: true })
+  workspaceIdsToDelete.add(workspaceId)
+  workspacePathsToDelete.add(workspacePath)
 
   insertWorkspaceRow({
     id: workspaceId,
     name: workspaceId,
-    path: resolveTestWorkspacePath(workspaceId),
+    path: workspacePath,
     sourceType: "create",
-    runtimeMode: "burns-managed",
+    runtimeMode: "self-managed",
+    smithersBaseUrl: "http://127.0.0.1:8787",
     healthStatus: "healthy",
     createdAt: now,
     updatedAt: now,
@@ -28,6 +36,17 @@ function seedWorkspace(workspaceId = `test-workspace-${randomUUID()}`) {
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+
+  for (const workspaceId of workspaceIdsToDelete) {
+    deleteApprovalRowsByWorkspaceId(workspaceId)
+    deleteWorkspaceRowById(workspaceId)
+  }
+  workspaceIdsToDelete.clear()
+
+  for (const workspacePath of workspacePathsToDelete) {
+    rmSync(workspacePath, { recursive: true, force: true })
+  }
+  workspacePathsToDelete.clear()
 })
 
 describe("approval service", () => {
@@ -86,8 +105,49 @@ describe("approval service", () => {
 
     const capturedRequests: Array<{ url: string; body: unknown }> = []
     globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      const url = String(input)
       const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
-      capturedRequests.push({ url: String(input), body })
+      capturedRequests.push({ url, body })
+
+      if (url.includes("/v1/runs/run-9/nodes/deploy/approve")) {
+        return Response.json({ ok: true })
+      }
+
+      if (url.endsWith("/v1/runs/run-9")) {
+        return Response.json({
+          run: {
+            id: "run-9",
+            workflowId: "echo-approve",
+            workflowName: "echo-approve",
+            workflowPath: `${resolveTestWorkspacePath(workspaceId)}/.smithers/workflows/echo-approve/workflow.tsx`,
+            status: "waiting-approval",
+            startedAt: "2026-03-13T15:49:06.499Z",
+            summary: {
+              finished: 3,
+              inProgress: 0,
+              pending: 1,
+            },
+          },
+        })
+      }
+
+      if (url.endsWith("/v1/runs/run-9/resume")) {
+        return Response.json({
+          run: {
+            id: "run-9",
+            workflowId: "echo-approve",
+            workflowName: "echo-approve",
+            status: "running",
+            startedAt: "2026-03-13T15:49:06.499Z",
+            summary: {
+              finished: 3,
+              inProgress: 1,
+              pending: 0,
+            },
+          },
+        })
+      }
+
       return Response.json({ ok: true })
     }) as typeof fetch
 
@@ -103,6 +163,9 @@ describe("approval service", () => {
     })
 
     expect(capturedRequests.some((request) => request.url.includes("/v1/runs/run-9/nodes/deploy/approve"))).toBe(true)
+    expect(capturedRequests.some((request) => request.url.endsWith("/v1/runs/run-9/resume"))).toBe(
+      true
+    )
     expect(decided).toMatchObject({
       id: seeded.id,
       workspaceId,

@@ -9,6 +9,7 @@ import {
 } from "@/db/repositories/approval-repository"
 import { approveSmithersNode, denySmithersNode } from "@/integrations/smithers/http-client"
 import { appendRunEvent } from "@/services/run-event-service"
+import { resumeRun as resumeSmithersWorkflowRun } from "@/services/smithers-service"
 import { ensureWorkspaceSmithersBaseUrl } from "@/services/smithers-instance-service"
 import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
@@ -143,6 +144,10 @@ export async function decideApproval(params: {
       params.input.note ??
       `${params.input.decidedBy} ${params.decision === "approved" ? "approved" : "denied"} node ${params.nodeId}`,
   })
+
+  if (params.decision === "approved") {
+    await resumeSmithersWorkflowRun(params.workspaceId, params.runId, {})
+  }
 
   return updatedApproval
 }
